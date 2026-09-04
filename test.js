@@ -16,3 +16,18 @@ let qsum=0,tsum=0,wsum=0;for(let i=1;i<=4;i++)for(let j=i+1;j<=4;j++){qsum+=C.qu
 if(Math.abs(qsum-1)>1e-9)throw Error('quinella probs sum '+qsum);if(Math.abs(tsum-1)>1e-9)throw Error('trio probs sum '+tsum);if(Math.abs(wsum-3)>1e-9)throw Error('wide probs sum '+wsum);
 const adv=C.combinationAdvice(rr,{quinella:{'1-2':3.5},wide:{'1-2':1.8},trio:{'1-2-3':3.0}},1.1);if(!adv.quinella.length||adv.quinella.find(x=>x.key==='1-2').odds!==3.5)throw Error('advice');
 console.log('Combination probability/odds: OK');
+
+// v1.2 history grading tests
+{
+  const hist=[
+    {pick:3,tickets:[{type:'馬連',key:'3-5'},{type:'ワイド',key:'3-7'},{type:'三連複',key:'3-5-7'}],result:{first:3,second:5,third:7}},
+    {pick:2,tickets:[{type:'馬連',key:'2-4'},{type:'ワイド',key:'2-6'},{type:'三連複',key:'2-4-6'}],result:{first:4,second:2,third:8}}
+  ];
+  const a=C.allTypeAccuracy(hist);
+  const by=Object.fromEntries(a.map(x=>[x.type,x]));
+  if(by['単勝'].hits!==1||by['単勝'].total!==2)throw Error('single history stats');
+  if(by['馬連'].hits!==2)throw Error('quinella history stats');
+  if(by['ワイド'].hits!==1)throw Error('wide history stats');
+  if(by['三連複'].hits!==1)throw Error('trio history stats');
+  console.log('History ticket grading: OK',a);
+}
