@@ -8,32 +8,99 @@ function uniq(a){const m=new Map();for(const h of a)if(h.number>0&&h.name&&!m.ha
 function parsePayload(raw){try{const x=JSON.parse(raw);if(x&&x.umascope)return x}catch{}return {umascope:1,url:'',title:'',text:String(raw||''),tables:[],oddsText:'',oddsTables:[]}}
 function parseHeaderJRA(t){const h=t.match(/(\d{4}年\d{1,2}月\d{1,2}日)[^\n]*?(\d+)回([^\d\s]+?)(\d+)日[^\n]*?(?:Image:\s*)?(\d{1,2})(?:レース|R)/);const tm=t.match(/発走時刻[：:]\s*(\d{1,2})時(\d{2})分/);const c=t.match(/コース[：:]\s*([\d,]+)メートル（(芝|ダート)(?:・([^）]+))?/);let name='';const hm=t.match(/(?:^|\n)#{1,3}\s*([^\n]+)/);if(hm)name=norm(hm[1]).replace(/^Image\s*/,'');if(!name){const lines=t.split('\n').map(norm).filter(Boolean);const i=lines.findIndex(x=>/コース[：:]/.test(x));if(i>0)name=lines[i-1].replace(/^#+\s*/,'')}
 return {source:'JRA',type:'central',date:h?iso(h[1]):'',courseName:h?h[3]:'JRA',raceNo:h?Number(h[5]):null,name:name||`${h?h[5]:''}R`,start:tm?`${String(tm[1]).padStart(2,'0')}:${tm[2]}`:'',distance:c?Number(c[1].replace(',','')):null,surface:c?(c[2]==='ダート'?'ダ':c[2]):'',direction:c?c[3]||'':'',going:(t.match(/(?:芝|ダート)[：:\s]*(良|稍重|重|不良)/)||[])[1]||''}}
-function parseJraPast(s){s=norm(s.replace(/\n+/g,' '));const m=s.match(/(20\d{2})年(\d{1,2})月(\d{1,2})日\s+([^\s]+)[\s\S]*?(\d{1,2})着\s+(\d{1,2})頭[^\s]*?(\d{1,2})番人気\s+(.+?)\s+\d{2}(?:\.\d)?\s*kg\s+(\d{3,4})(芝|ダ)[^\s]*\s+\d+[:.]\d+(?:\.\d+)?\s+(良|稍重|重|不良)/);if(!m)return null;const mm=s.match(/\(([0-9]+(?:\.[0-9]+)?)\)\s*$/)||s.match(/\(([0-9]+(?:\.[0-9]+)?)\)/g);let margin=null;if(mm){const z=Array.isArray(mm)?String(mm[mm.length-1]).match(/[0-9.]+/):mm; margin=Number(z[1]||z[0])}
-return {date:`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`,course:m[4],finish:Number(m[5]),field:Number(m[6]),pop:Number(m[7]),jockey:norm(m[8]).replace(/^[▲△☆◇]/,''),distance:Number(m[9]),surface:m[10],going:m[11],margin}}
+function parseJraPast(s){
+s=norm(jraNormText(String(s||'')).replace(/\n+/g,' '));
+const dm=s.match(/(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日\s+([^\s]+)/);if(!dm)return null;
+const fm=s.match(/(\d{1,2})着/),field=s.match(/(\d{1,2})頭/),pop=s.match(/(\d{1,2})番人気/);if(!fm||!field)return null;
+let jockey='',widx=-1;
+const wm=s.match(/(\d{2}(?:\.\d)?)\s*kg/);if(wm){widx=wm.index||0;const pidx=pop?(pop.index||0)+pop[0].length:0;jockey=cleanJockey(s.slice(pidx,widx).replace(/^.*?(?:着|頭|番)\s*/,'').trim())}
+let distance=null,surface='';
+let tr=s.match(/(\d{3,4})\s*(芝|ダート|ダ)/);if(tr){distance=Number(tr[1]);surface=tr[2]==='芝'?'芝':'ダ'}else{tr=s.match(/(芝|ダート|ダ)\s*(\d{3,4})/);if(tr){surface=tr[1]==='芝'?'芝':'ダ';distance=Number(tr[2])}}
+if(!distance)return null;
+let going='';const tail=s.slice(tr.index+tr[0].length);const gm=tail.match(/(?:\d+[:.]\d+(?:\.\d+)?\s+)?(良|稍重|重|不良)/);if(gm)going=gm[1];
+let margin=null;const ms=[...s.matchAll(/[（(]([0-9]+(?:\.[0-9]+)?)[）)]/g)];if(ms.length)margin=Number(ms[ms.length-1][1]);
+return {date:`${dm[1]}-${String(dm[2]).padStart(2,'0')}-${String(dm[3]).padStart(2,'0')}`,course:dm[4],finish:Number(fm[1]),field:Number(field[1]),pop:pop?Number(pop[1]):null,jockey,distance,surface,going,margin}
+}
 function cellText(c){return norm(typeof c==='string'?c:(c&&c.text)||'')}
 function cellHtml(c){return typeof c==='object'&&c?String(c.html||''):''}
 function payloadTables(p){return (p.richTables&&p.richTables.length?p.richTables:(p.tables||[]))}
 function fwDigits(s){return String(s||'').replace(/[０-９]/g,d=>String('０１２３４５６７８９'.indexOf(d)))}
 function narNormText(s){return fwDigits(String(s||'')).replace(/\u00a0/g,' ').replace(/\r/g,'')}
 function narPayloadTables(p){const out=[];for(const k of ['narDetailRichTables','narDetailTables','richTables','tables']){for(const t of (p[k]||[]))out.push(t)}return out}
+function jraNormText(s){return fwDigits(String(s||'')).replace(/\u00a0/g,' ').replace(/\r/g,'').replace(/㎏/g,'kg').replace(/ｍ/g,'m')}
+function jraPayloadTables(p){const out=[];for(const k of ['jraDetailTables','jraTables','tables','richTables']){for(const t of (p[k]||[]))out.push(t)}return out}
+function parseJraPastsFromText(s){s=jraNormText(s);const starts=[...s.matchAll(/20\d{2}年\d{1,2}月\d{1,2}日/g)];const out=[],seen=new Set();for(let i=0;i<starts.length;i++){const st=starts[i].index,en=i+1<starts.length?starts[i+1].index:s.length,p=parseJraPast(s.slice(st,en));if(p){const k=[p.date,p.course,p.finish,p.distance,p.jockey].join('|');if(!seen.has(k)){seen.add(k);out.push(p)}}}return out}
+function parseJraHorseTextBlocks(t){
+  t=jraNormText(t);const lines=t.split('\n').map(norm).filter(Boolean),marks=[];
+  for(let i=0;i<lines.length;i++){
+    const line=lines[i];
+    if(!/(?:美浦|栗東)[）)]/.test(line)||/^20\d{2}年/.test(line)||/^父[：:]/.test(line)||/^母[：:]/.test(line))continue;
+    let name=(line.match(/^([ァ-ヶー々〆ヵヶ一-龠A-Za-z0-9・'’.-]{2,40})(?:\s|\d{1,3}(?:\.\d+)?\s*\(|\()/)||[])[1]||'';
+    if(!name){
+      const toks=line.split(/\s+/).filter(Boolean);
+      name=toks.find(x=>/^[ァ-ヶー々〆ヵヶ一-龠A-Za-z0-9・'’.-]{2,40}$/.test(x)&&!/(美浦|栗東)/.test(x))||'';
+    }
+    if(name)marks.push({i,name})
+  }
+  const out=[];let seq=0;
+  for(let m=0;m<marks.length;m++){
+    const a=marks[m],b=m+1<marks.length?marks[m+1].i:lines.length,block=lines.slice(a.i,b).join('\n');
+    let jockey='',weight=null;
+    const jm=block.match(/(?:牡|牝|せん|セン|騸)\s*\d+(?:\/[^\s]+)?[\s\S]{0,40}?(\d{2}(?:\.\d)?)\s*kg\s*([▲△☆◇★]?[ぁ-んァ-ヶー一-龠々・A-Za-z. ]{2,30})/);
+    if(jm){weight=Number(jm[1]);jockey=cleanJockey(jm[2].split(/\n/)[0])}
+    let number=null;
+    for(let j=a.i-1;j>=Math.max(0,a.i-5);j--){if(/^\d{1,2}$/.test(lines[j])){const n=Number(lines[j]);if(n>=1&&n<=18){number=n;break}}}
+    seq++; if(!number)number=seq;
+    out.push({number,name:a.name,jockey,weight,odds:null,recent:parseJraPastsFromText(block).slice(0,4),records:{}})
+  }
+  return out
+}
+
 function horseNoFromCells(rawCells,limit){const found=[];for(let i=0;i<Math.min(limit,rawCells.length);i++){const t=cellText(rawCells[i]);if(/^\d{1,2}$/.test(t)){const n=Number(t);if(n>=1&&n<=18)found.push(n)}const h=cellHtml(rawCells[i]);const ms=[...h.matchAll(/(?:umaban|horse[-_ ]?no|number|num)[^0-9]{0,30}(\d{1,2})/gi)];for(const m of ms){const n=Number(m[1]);if(n>=1&&n<=18)found.push(n)}}return found.length?found[found.length-1]:null}
 function cleanJockey(s){return norm(String(s||'').replace(/^\s*[▲△☆◇]/,'').replace(/\s+Image:.*$/,''))}
 function imgAwareCellText(c){return cellText(c)}
-function parseJRA(p){const t=p.text||'';if(!/(JRA|出馬表|コース：|コース:)/.test(t))return null;const r=parseHeaderJRA(t);const hs=[];let seq=0;
-for(const table of payloadTables(p)){const texts=table.map(row=>row.map(cellText));const flat=texts.flat().join(' ');if(!/馬名|調教師名/.test(flat)||!/前走/.test(flat))continue;
-for(let ri=0;ri<table.length;ri++){const rawCells=table[ri],cells=rawCells.map(cellText);if(cells.some(x=>/馬番/.test(x)&&/馬名/.test(cells.join(' '))))continue;
-let hi=cells.findIndex(c=>/(?:美浦|栗東)[）)]/.test(c)&&!/20\d{2}年/.test(c)&&!/^父[：:]/.test(c));
-if(hi<0)hi=cells.findIndex(c=>/父[：:]|母[：:]/.test(c)&&!/^20\d{2}年/.test(c));
-if(hi<0)continue;
-let hc=cells[hi].replace(/\s+Image:.*$/,'').trim();let first=hc.split(/\s+/)[0]||'';first=first.replace(/^Image:/,'').trim();
-if(!first||/^(馬名|調教師名|父|母|ブリンカー)/.test(first))continue;
-let ji=cells.findIndex((c,i)=>i!==hi&&/(?:牡|牝|せん|セン|騸)\s*\d/.test(c)&&/\d{2}(?:\.\d)?\s*kg/.test(c));if(ji<0)ji=hi+1<cells.length?hi+1:-1;
-const jc=ji>=0?cells[ji]:'';const wm=jc.match(/(\d{2}(?:\.\d)?)\s*kg/);let jockey='';if(wm){const after=jc.slice((wm.index||0)+wm[0].length);jockey=cleanJockey(after)}
-seq++;let number=horseNoFromCells(rawCells,Math.max(hi,2));if(!number||hs.some(x=>x.number===number))number=seq;
-const recent=[];for(const c of cells){const past=parseJraPast(c);if(past)recent.push(past)}
-hs.push({number,name:first,jockey,weight:wm?Number(wm[1]):null,odds:null,recent:recent.slice(0,4),records:{}})}}
-if(!hs.length){const lines=t.split('\n').map(norm).filter(Boolean);for(let i=0;i<lines.length;i++){const line=lines[i];const hm=line.match(/^([ァ-ヶー々〆ヵヶ一-龠A-Za-z0-9・'’.-]+)\s+.+[（(](?:美浦|栗東)[）)]/);if(!hm)continue;const name=hm[1];let jockey='',weight=null;for(let j=i+1;j<Math.min(lines.length,i+8);j++){const jm=lines[j].match(/(?:牡|牝|せん|セン|騸)\s*\d[^\n]*?(\d{2}(?:\.\d)?)\s*kg\s*(.+)$/);if(jm){weight=Number(jm[1]);jockey=cleanJockey(jm[2]);break}}hs.push({number:hs.length+1,name,jockey,weight,odds:null,recent:[],records:{}})}}
-r.horses=uniq(hs);mergeOdds(r,p);return r.horses.length?r:null}
+function parseJRA(p){
+const t=jraNormText(p.jraDetailText||p.jraText||p.text||'');if(!/(JRA|出馬表|コース[：:]|前走)/.test(t))return null;
+const r=parseHeaderJRA(t),map=new Map();let seq=0;
+for(const table of jraPayloadTables(p)){
+  const texts=table.map(row=>row.map(cellText)),flat=texts.flat().join(' ');
+  if(!/馬名/.test(flat)||!/前走/.test(flat))continue;
+  for(let ri=0;ri<table.length;ri++){
+    const rawCells=table[ri],cells=rawCells.map(cellText),joined=cells.join('\n');
+    if(cells.some(x=>/馬番/.test(x)&&/馬名/.test(joined)))continue;
+    let hi=cells.findIndex(c=>/(?:美浦|栗東)[）)]/.test(c)&&!/^20\d{2}年/.test(c)&&!/^父[：:]/.test(c));
+    if(hi<0)continue;
+    let hc=cells[hi].replace(/\s+Image:.*$/,'').trim();
+    let name=(hc.match(/^([ァ-ヶー々〆ヵヶ一-龠A-Za-z0-9・'’.-]{2,40})(?:\s|\d{1,3}(?:\.\d+)?\s*\(|\()/)||[])[1]||hc.split(/\s+/)[0]||'';
+    name=name.replace(/^Image:/,'').trim();if(!name||/^(馬名|調教師名|父|母|ブリンカー)/.test(name))continue;
+    let ji=cells.findIndex((c,i)=>i!==hi&&/(?:牡|牝|せん|セン|騸)\s*\d/.test(c)&&/\d{2}(?:\.\d)?\s*kg/.test(c));if(ji<0)ji=hi+1<cells.length?hi+1:-1;
+    const jc=ji>=0?cells[ji]:'';const wm=jc.match(/(\d{2}(?:\.\d)?)\s*kg/);let jockey='';
+    if(wm){const after=jc.slice((wm.index||0)+wm[0].length);jockey=cleanJockey(after)}
+    seq++;let number=horseNoFromCells(rawCells,Math.max(hi,2));if(!number||map.has(number))number=seq;
+    let recent=parseJraPastsFromText(joined).slice(0,4);
+    let odds=null;const om=hc.match(/(\d{1,3}(?:\.\d+)?)\s*\((\d{1,2})番人気\)/);if(om)odds=Number(om[1]);
+    map.set(number,{number,name,jockey,weight:wm?Number(wm[1]):null,odds,recent,records:{}})
+  }
+}
+const textHorses=parseJraHorseTextBlocks(t);
+for(const h of textHorses){
+  let existing=[...map.values()].find(x=>x.name.replace(/\s/g,'')===h.name.replace(/\s/g,''));
+  if(existing){
+    if(!existing.jockey&&h.jockey)existing.jockey=h.jockey;
+    if(existing.weight==null&&h.weight!=null)existing.weight=h.weight;
+    if((!existing.recent||!existing.recent.length)&&h.recent?.length)existing.recent=h.recent;
+  }else map.set(h.number,h)
+}
+let hs=[...map.values()].sort((a,b)=>a.number-b.number);
+// Last-resort: for horses found from table, parse body block between this name and next horse name.
+for(let i=0;i<hs.length;i++){
+  const h=hs[i];if(h.recent?.length)continue;
+  const st=t.indexOf(h.name);if(st<0)continue;
+  let en=t.length;for(let j=i+1;j<hs.length;j++){const q=t.indexOf(hs[j].name,st+h.name.length);if(q>=0){en=q;break}}
+  const rec=parseJraPastsFromText(t.slice(st,en)).slice(0,4);if(rec.length)h.recent=rec
+}
+r.horses=uniq(hs);mergeOdds(r,p);return r.horses.length?r:null
+}
 function parseHeaderNAR(t){
 t=narNormText(t);
 const h=t.match(/(\d{4}年\d{1,2}月\d{1,2}日)[^\n]*?([ぁ-んァ-ヶー一-龠々\s]{1,16})\s*第?\s*(\d{1,2})競走/);

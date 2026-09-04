@@ -116,3 +116,44 @@ console.log('Combination probability/odds: OK');
  if(r14.courseName!=='高知'||r14.raceNo!==2||r14.distance!==1300)throw Error('v1.4 header '+JSON.stringify(r14));
  console.log('v1.4 NAR detailed card regression: OK',r14.horses.map(h=>[h.number,h.name,h.jockey,h.recent.length]));
 }
+
+
+// v1.5 JRA current card row regression (desktop/plain table)
+{
+ const p={umascope:5,url:'https://www.jra.go.jp/JRADB/accessD.html',title:'出馬表 JRA',
+ text:`JRA
+2026年9月5日（土曜） 2回札幌5日 発走時刻：12時40分 6レース
+3歳未勝利
+コース：2,000メートル（芝・右）
+芝：重
+ハヤブサブロー 26.5(12番人気) (0.0.0.4)59万円 武田 修 新冠橋本牧場 高橋 義忠 (栗東)
+牝3/栗 55.0 kg 横山 琉人
+2026年7月4日 函館 牝未勝利 11着 11頭12番10番人気 吉田 隼人 55.0 kg 1700ダ 1:53.3 良 432 kg 3F 43.9 ギンケイ(6.6)
+2026年6月20日 函館 未勝利 13着 16頭6番10番人気 吉田 隼人 55.0 kg 2000芝 2:01.9 良 430 kg 3F 36.8 ジャケットポケット(2.4)
+2026年4月11日 福島 牝未勝利 9着 16頭11番2番人気 吉田 隼人 55.0 kg 1800芝 1:48.3 良 426 kg 3F 36.1 サフランルージュ(0.7)
+2026年3月15日 中京 牝未勝利 5着 16頭8番7番人気 吉田 隼人 55.0 kg 1600芝 1:35.4 良 436 kg 3F 34.3 スリラーナイト(0.5)`,
+ jraTables:[[
+ ['枠','馬番','馬名 / 単勝オッズ(人気) 戦績 / 総賞金 / 馬体重 馬主名 / 生産者名 / 調教師名 / 血統','性齢/毛色 負担重量 騎手名','前走','前々走','3走前','4走前'],
+ ['1','1','ハヤブサブロー 26.5(12番人気) (0.0.0.4)59万円 武田 修 新冠橋本牧場 高橋 義忠 (栗東)','牝3/栗 55.0 kg 横山 琉人','2026年7月4日 函館 牝未勝利 11着 11頭12番10番人気 吉田 隼人 55.0 kg 1700ダ 1:53.3 良 432 kg 3F 43.9 ギンケイ(6.6)','2026年6月20日 函館 未勝利 13着 16頭6番10番人気 吉田 隼人 55.0 kg 2000芝 2:01.9 良 430 kg 3F 36.8 ジャケットポケット(2.4)','2026年4月11日 福島 牝未勝利 9着 16頭11番2番人気 吉田 隼人 55.0 kg 1800芝 1:48.3 良 426 kg 3F 36.1 サフランルージュ(0.7)','2026年3月15日 中京 牝未勝利 5着 16頭8番7番人気 吉田 隼人 55.0 kg 1600芝 1:35.4 良 436 kg 3F 34.3 スリラーナイト(0.5)']
+ ]]};
+ const r=C.parse(JSON.stringify(p));
+ if(!r||r.horses.length!==1)throw Error('v1.5 JRA parse fail '+JSON.stringify(r));
+ if(r.horses[0].recent.length!==4)throw Error('v1.5 JRA recent '+JSON.stringify(r.horses[0]));
+ if(r.horses[0].recent[0].finish!==11||r.horses[0].recent[0].distance!==1700)throw Error('v1.5 first past '+JSON.stringify(r.horses[0].recent[0]));
+ console.log('v1.5 JRA current-card regression: OK',r.horses[0].name,r.horses[0].jockey,r.horses[0].recent.length);
+}
+// v1.5 JRA body-text-only fallback
+{
+ const p={umascope:5,url:'https://www.jra.go.jp/JRADB/accessD.html',text:`JRA
+2026年9月5日（土曜） 2回札幌5日 発走時刻：12時40分 6レース
+3歳未勝利
+コース：2,000メートル（芝・右）
+1
+ハヤブサブロー 26.5(12番人気) (0.0.0.4) 高橋 義忠 (栗東)
+牝3/栗 55.0 kg 横山 琉人
+2026年7月4日 函館 牝未勝利 11着 11頭12番10番人気 吉田 隼人 55.0 kg 1700ダ 1:53.3 良 432 kg ギンケイ(6.6)
+2026年6月20日 函館 未勝利 13着 16頭6番10番人気 吉田 隼人 55.0 kg 2000芝 2:01.9 良 430 kg ジャケットポケット(2.4)`};
+ const r=C.parse(JSON.stringify(p));
+ if(!r||!r.horses[0]||r.horses[0].recent.length!==2)throw Error('v1.5 body fallback '+JSON.stringify(r));
+ console.log('v1.5 JRA body fallback: OK',r.horses[0].recent.length);
+}
