@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.5",
+  "name": "UmaScope Free AutoBet 1.6",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "中央・地方競馬対応の無料・JRA近走取込・過去データ蓄積・バックテストPWA"
+  "description": "JRA会場・レース番号補完、近走解析、中央・地方競馬対応の無料PWA"
 }

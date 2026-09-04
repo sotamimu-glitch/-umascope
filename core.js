@@ -6,8 +6,34 @@ const num=s=>{const m=String(s??'').match(/\d+(?:\.\d+)?/);return m?Number(m[0])
 const iso=s=>{const m=String(s).match(/(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日/);return m?`${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`:''};
 function uniq(a){const m=new Map();for(const h of a)if(h.number>0&&h.name&&!m.has(h.number))m.set(h.number,h);return [...m.values()].sort((a,b)=>a.number-b.number)}
 function parsePayload(raw){try{const x=JSON.parse(raw);if(x&&x.umascope)return x}catch{}return {umascope:1,url:'',title:'',text:String(raw||''),tables:[],oddsText:'',oddsTables:[]}}
-function parseHeaderJRA(t){const h=t.match(/(\d{4}年\d{1,2}月\d{1,2}日)[^\n]*?(\d+)回([^\d\s]+?)(\d+)日[^\n]*?(?:Image:\s*)?(\d{1,2})(?:レース|R)/);const tm=t.match(/発走時刻[：:]\s*(\d{1,2})時(\d{2})分/);const c=t.match(/コース[：:]\s*([\d,]+)メートル（(芝|ダート)(?:・([^）]+))?/);let name='';const hm=t.match(/(?:^|\n)#{1,3}\s*([^\n]+)/);if(hm)name=norm(hm[1]).replace(/^Image\s*/,'');if(!name){const lines=t.split('\n').map(norm).filter(Boolean);const i=lines.findIndex(x=>/コース[：:]/.test(x));if(i>0)name=lines[i-1].replace(/^#+\s*/,'')}
-return {source:'JRA',type:'central',date:h?iso(h[1]):'',courseName:h?h[3]:'JRA',raceNo:h?Number(h[5]):null,name:name||`${h?h[5]:''}R`,start:tm?`${String(tm[1]).padStart(2,'0')}:${tm[2]}`:'',distance:c?Number(c[1].replace(',','')):null,surface:c?(c[2]==='ダート'?'ダ':c[2]):'',direction:c?c[3]||'':'',going:(t.match(/(?:芝|ダート)[：:\s]*(良|稍重|重|不良)/)||[])[1]||''}}
+const JRA_COURSES={'01':'札幌','02':'函館','03':'福島','04':'新潟','05':'東京','06':'中山','07':'中京','08':'京都','09':'阪神','10':'小倉'};
+function jraUrlMeta(url){
+  let u='';try{u=decodeURIComponent(String(url||''))}catch{u=String(url||'')}
+  const m=u.match(/pw01dde\d{2}(\d{2})(20\d{2})(\d{2})(\d{2})(\d{2})(20\d{6})/i);
+  if(!m)return {};
+  const y=m[2],d=m[6];
+  return {courseCode:m[1],courseName:JRA_COURSES[m[1]]||'',date:`${y}-${d.slice(4,6)}-${d.slice(6,8)}`,meeting:Number(m[3]),day:Number(m[4]),raceNo:Number(m[5])}
+}
+function parseHeaderJRA(t,p={}){
+  t=jraNormText(t);
+  const all=[t,p?.title||'',p?.jraText||'',p?.text||''].map(jraNormText).filter(Boolean).join('\n');
+  const h=all.match(/(\d{4}年\d{1,2}月\d{1,2}日)[^\n]*?(\d+)回\s*([^\d\s]+?)\s*(\d+)日[^\n]*?(?:Image:\s*)?(\d{1,2})(?:レース|R)/);
+  const simple=all.match(/(\d{4}年\d{1,2}月\d{1,2}日)[^\n]*?([札幌函館福島新潟東京中山中京京都阪神小倉]{2})[^\n]*?(\d{1,2})(?:レース|R)/);
+  const urlm=jraUrlMeta(p?.url||'');
+  const tm=all.match(/発走時刻[：:]\s*(\d{1,2})時(\d{2})分/);
+  const c=all.match(/コース[：:]\s*([\d,]+)メートル（(芝|ダート)(?:・([^）]+))?/);
+  let name='';
+  const hm=all.match(/(?:^|\n)#{1,3}\s*([^\n]+)/);
+  if(hm)name=norm(hm[1]).replace(/^Image\s*/,'');
+  if(!name){
+    const lines=all.split('\n').map(norm).filter(Boolean),i=lines.findIndex(x=>/コース[：:]/.test(x));
+    if(i>0)name=lines[i-1].replace(/^#+\s*/,'')
+  }
+  const courseName=(h&&h[3])||(simple&&simple[2])||urlm.courseName||'JRA';
+  const raceNo=(h&&Number(h[5]))||(simple&&Number(simple[3]))||urlm.raceNo||null;
+  const date=(h&&iso(h[1]))||(simple&&iso(simple[1]))||urlm.date||'';
+  return {source:'JRA',type:'central',date,courseName,raceNo,name:name||`${raceNo||''}R`,start:tm?`${String(tm[1]).padStart(2,'0')}:${tm[2]}`:'',distance:c?Number(c[1].replace(',','')):null,surface:c?(c[2]==='ダート'?'ダ':c[2]):'',direction:c?c[3]||'':'',going:(all.match(/(?:芝|ダート)[：:\s]*(良|稍重|重|不良)/)||[])[1]||''}
+}
 function parseJraPast(s){
 s=norm(jraNormText(String(s||'')).replace(/\n+/g,' '));
 const dm=s.match(/(20\d{2})年\s*(\d{1,2})月\s*(\d{1,2})日\s+([^\s]+)/);if(!dm)return null;
@@ -61,7 +87,7 @@ function cleanJockey(s){return norm(String(s||'').replace(/^\s*[▲△☆◇]/,'
 function imgAwareCellText(c){return cellText(c)}
 function parseJRA(p){
 const t=jraNormText(p.jraDetailText||p.jraText||p.text||'');if(!/(JRA|出馬表|コース[：:]|前走)/.test(t))return null;
-const r=parseHeaderJRA(t),map=new Map();let seq=0;
+const headerText=jraNormText(p.jraText||p.text||p.title||t),r=parseHeaderJRA(headerText,p),map=new Map();let seq=0;
 for(const table of jraPayloadTables(p)){
   const texts=table.map(row=>row.map(cellText)),flat=texts.flat().join(' ');
   if(!/馬名/.test(flat)||!/前走/.test(flat))continue;

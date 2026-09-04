@@ -157,3 +157,46 @@ console.log('Combination probability/odds: OK');
  if(!r||!r.horses[0]||r.horses[0].recent.length!==2)throw Error('v1.5 body fallback '+JSON.stringify(r));
  console.log('v1.5 JRA body fallback: OK',r.horses[0].recent.length);
 }
+
+// v1.6 JRA header fallback: detail text lacks venue/race; normal page and URL supply them
+{
+ const p={umascope:5,
+   url:'https://www.jra.go.jp/JRADB/accessD.html?CNAME=pw01dde0101202602051120260905%2F8C',
+   title:'出馬表 JRA',
+   jraText:`JRA
+2026年9月5日（土曜） 2回札幌5日 発走時刻：15時20分 Image: 11レース
+第61回札幌2歳ステークス
+2歳 オープン （国際）（特指） 馬齢 コース：1,800メートル（芝・右）
+芝：良`,
+   jraDetailText:`第61回札幌2歳ステークス
+コース：1,800メートル（芝・右）
+1
+ショウナンガレオン 加藤 士津八(美浦)
+牡2/鹿 55.0 kg 鮫島 克駿
+2026年7月5日 函館 新馬 1着 5頭1番1番人気 鮫島 克駿 55.0 kg 1800芝 1:47.6 良 486 kg ダノンキューブ(0.4)`,
+   jraTables:[[
+     ['枠','馬番','馬名','性齢/負担重量/騎手名','前走','前々走','3走前','4走前'],
+     ['1','1','ショウナンガレオン 加藤 士津八(美浦)','牡2/鹿 55.0 kg 鮫島 克駿','2026年7月5日 函館 新馬 1着 5頭1番1番人気 鮫島 克駿 55.0 kg 1800芝 1:47.6 良 486 kg ダノンキューブ(0.4)','','','']
+   ]]
+ };
+ const r=C.parse(JSON.stringify(p));
+ if(!r)throw Error('v1.6 parse failed');
+ if(r.courseName!=='札幌'||r.raceNo!==11||r.date!=='2026-09-05')throw Error('v1.6 header '+JSON.stringify({course:r.courseName,race:r.raceNo,date:r.date}));
+ console.log('v1.6 JRA venue/race header fallback: OK',r.courseName,r.raceNo,r.date);
+}
+// URL-only fallback
+{
+ const p={umascope:5,url:'https://www.jra.go.jp/JRADB/accessD.html?CNAME=pw01dde0109202604010720260905%2F5E',
+   title:'出馬表 JRA',
+   text:`JRA
+3歳以上1勝クラス
+コース：1,200メートル（芝・右)
+1
+アウクソー 平田 修(栗東)
+牝6/鹿 56.0 kg 秋山 稔樹
+2026年8月9日 中京 1勝クラス 8着 17頭10番15番人気 秋山 稔樹 56.0 kg 1200芝 1:08.2 良 434 kg パリコレジェンヌ(0.4)`};
+ const r=C.parse(JSON.stringify(p));
+ if(!r)throw Error('v1.6 url parse failed');
+ if(r.courseName!=='阪神'||r.raceNo!==7||r.date!=='2026-09-05')throw Error('v1.6 url fallback '+JSON.stringify(r));
+ console.log('v1.6 JRA URL fallback: OK',r.courseName,r.raceNo,r.date);
+}
