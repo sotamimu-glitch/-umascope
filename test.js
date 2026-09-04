@@ -54,3 +54,65 @@ console.log('Combination probability/odds: OK');
   if(!wf.enough||wf.testRaces<1)throw Error('walk forward '+JSON.stringify(wf));
   console.log('v1.3 backtest/group/walk-forward: OK', {roi:s.roi, wf: {threshold:wf.threshold, validation:wf.validation.roi}});
 }
+
+
+// v1.4 real NAR DebaTableSmall-style text regression
+{
+ const detail={umascope:4,url:'https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/DebaTableSmall?k_babaCode=31&k_raceDate=2026%2F09%2F05&k_raceNo=2',title:'2R 出馬表',text:'地方競馬情報サイト',narDetailText:`2026年9月5日（土）　 高　知　第２競走 　ダート　1300ｍ（右）16:00発走
+Ｃ３－７
+（サラブレッド系　一般 定量 ）
+2Ｒ　出　馬　表
+1 1 ナダル   牡 4
+ヒデノブルースカイ
+ブロンシェダーム   鹿毛
+（ディープインパクト）
+（同）ＪＰＮ技研   ヒサイファーム 田中譲
+（高知） 57.0
+郷間勇
+（高知）
+1-2-0-10   3-2-0-21
+0-0-0-1
+2-2-0-15
+全 3-2-0-21
+場 2-2-0-12
+距 1-2-0-10
+高知07.26 良 右 1600
+Ｃ２－４
+9/11 4人 郷間勇 57.0
+6番 435 ミステリオ
+1503（3.0） 4-4-5-6 43.5
+高知07.11 重 右 1300
+小暑特別Ｃ２－１選抜馬
+5/11 11人 郷間勇 57.0
+1番 438 プレジール
+1249（0.7） 1-1-1-1 41.2
+2 2 デクラレーションオブウォー   牝 4
+ディクシーヴォーグ
+レッドヴォーグ   栗毛
+（シンボリクリスエス）
+ウエスト．フォレスト 高村伸一 細川忠
+（高知） 55.0
+宮川実
+（高知）
+全 4-0-1-7
+場 1-0-0-0
+距 0-0-0-0
+高知08.02 良 右 1400
+Ｃ３－８
+1/12 7人 加藤翔 55.0
+2番 453 エクストラノート
+1315（1.1） 2-2-3-2 39.0
+Ｊ東京06.21 重 左 1400
+３歳上１勝クラス
+16/16 14人 ▲佐藤翔 53.0
+2番 448 タイキブリッツェン
+1254（2.6） 13-13 36.2`};
+ const r14=C.parse(JSON.stringify(detail));
+ if(!r14)throw Error('v1.4 NAR detail parse failed');
+ if(r14.horses.length!==2)throw Error('v1.4 horse count '+r14.horses.length);
+ if(r14.horses[0].name!=='ヒデノブルースカイ'||r14.horses[0].jockey!=='郷間勇')throw Error('v1.4 horse/jockey '+JSON.stringify(r14.horses[0]));
+ if(r14.horses[0].recent.length!==2)throw Error('v1.4 recent count '+r14.horses[0].recent.length);
+ if(r14.horses[0].recent[0].date!=='2026-07-26')throw Error('v1.4 recent date '+r14.horses[0].recent[0].date);
+ if(r14.courseName!=='高知'||r14.raceNo!==2||r14.distance!==1300)throw Error('v1.4 header '+JSON.stringify(r14));
+ console.log('v1.4 NAR detailed card regression: OK',r14.horses.map(h=>[h.number,h.name,h.jockey,h.recent.length]));
+}
