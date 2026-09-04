@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.2",
+  "name": "UmaScope Free AutoBet 1.3",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "中央・地方競馬対応の無料自動評価PWA"
+  "description": "中央・地方競馬対応の無料・過去データ蓄積・バックテストPWA"
 }

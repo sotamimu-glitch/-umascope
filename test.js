@@ -31,3 +31,26 @@ console.log('Combination probability/odds: OK');
   if(by['三連複'].hits!==1)throw Error('trio history stats');
   console.log('History ticket grading: OK',a);
 }
+
+// v1.3 backtest / grouping / walk-forward tests
+{
+  const hist=[];
+  for(let i=0;i<10;i++){
+    const hit=i%2===0;
+    hist.push({
+      id:i+1,createdAt:`2026-09-${String(i+1).padStart(2,'0')}T10:00:00+09:00`,date:`2026-09-${String(i+1).padStart(2,'0')}`,
+      market:i<5?'central':'local',type:i<5?'central':'local',course:i<5?'東京':'大井',surface:i<5?'芝':'ダ',distance:i<5?1600:1200,going:'良',race:'T'+i,
+      backtestTickets:[{t:'単勝',k:'1',n:[1],e:1.2,p:.25,o:5.0},{t:'馬連',k:'1-2',n:[1,2],e:1.1,p:.15,o:8.0}],
+      result:{first:hit?1:3,second:hit?2:4,third:5}
+    });
+  }
+  const s=C.summarizeBacktest(hist,{type:'単勝'});
+  if(s.total!==10||s.hits!==5||Math.abs(s.roi-2.5)>1e-9)throw Error('v1.3 summary '+JSON.stringify(s));
+  const g=C.groupBacktest(hist,'market',{});
+  if(g.length!==2)throw Error('v1.3 market groups');
+  if(C.distanceBand(1200)!=='～1200m'||C.distanceBand(1800)!=='1700～2000m')throw Error('distance bands');
+  if(C.evBand(1.25)!=='1.20～1.29')throw Error('ev band');
+  const wf=C.walkForward(hist,{type:'単勝'});
+  if(!wf.enough||wf.testRaces<1)throw Error('walk forward '+JSON.stringify(wf));
+  console.log('v1.3 backtest/group/walk-forward: OK', {roi:s.roi, wf: {threshold:wf.threshold, validation:wf.validation.roi}});
+}
