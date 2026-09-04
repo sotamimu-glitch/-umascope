@@ -1,3 +1,21 @@
+# UmaScope Free AutoBet 1.1
+
+## 1.1の修正
+- JRA出馬表で馬番が画像扱いでも、出走順から馬番を補完
+- JRAの馬名セルと騎手セルを内容から判別（列位置に依存しない）
+- NARスマホ出馬表で「枠番セルが省略された行」に対応
+- NARの馬名・騎手・斤量を表から直接抽出
+- 取込完了時に「騎手取得 x/y頭」を表示
+- Service Workerを更新し、GitHub Pages更新後に古いcore.jsが残りにくいよう改善
+
+## 更新方法（既にGitHub Pagesを使っている場合）
+1. ZIP内の `index.html`, `core.js`, `sw.js`, `bookmarklet.txt` をGitHubの既存リポジトリへ上書きアップロード。
+2. iPhoneでUmaScopeを開いて一度Safariを再読み込み。
+3. 設定タブの「コードをコピー」で **UmaScope取込ブックマークのURLを新しいコードへ差し替え**。
+4. JRA/NAR公式出馬表で取込をやり直す。
+
+※ horse/jockey解析を強化するため、1.1では新しいbookmarkletが表のHTML断片も端末内の解析用JSONへ含めます。外部サーバーへは送信しません。
+
 # UmaScope Free AutoBet
 
 中央競馬（JRA）＋地方競馬（NAR）対応、月額0円・iPhone中心で使うPWAです。
