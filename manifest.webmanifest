@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.8",
+  "name": "UmaScope Free AutoBet 1.8.1",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "10特徴量の100点評価・S〜D総合判定と、大きな見送り表示を備えた中央・地方競馬分析PWA"
+  "description": "総合判定・見送り/購入候補表示・予想保存ボタンの表示不具合を修正した中央/地方競馬分析PWA"
 }
