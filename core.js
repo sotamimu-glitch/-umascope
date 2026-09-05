@@ -319,7 +319,39 @@ for(let i=0;i<nos.length;i++)for(let j=i+1;j<nos.length;j++)for(let k=j+1;k<nos.
 const sort=x=>x.sort((a,b)=>(b.ev??-1)-(a.ev??-1)||b.prob-a.prob);return {quinella:sort(q),wide:sort(w),trio:sort(t),threshold}}
 function ticketHitOrder(t,o){const n=t.numbers||[];if(t.type==='単勝')return o[0]===n[0];if(t.type==='馬複'||t.type==='馬連'){const a=[o[0],o[1]].sort((x,y)=>x-y),b=n.slice(0,2).sort((x,y)=>x-y);return a[0]===b[0]&&a[1]===b[1]}if(t.type==='ワイド')return o.slice(0,3).includes(n[0])&&o.slice(0,3).includes(n[1]);if(t.type==='三連複'){const a=o.slice(0,3).sort((x,y)=>x-y),b=n.slice(0,3).sort((x,y)=>x-y);return a.every((v,i)=>v===b[i])}return false}
 function portfolioHitProbability(tickets,rows){if(!tickets?.length)return 0;const by={};rows.forEach(x=>by[x.h.number]=x.prob);const ns=rows.map(x=>x.h.number);let sum=0;for(const a of ns)for(const b of ns)if(b!==a)for(const c of ns)if(c!==a&&c!==b){const o=[a,b,c],p=orderProb(o,by);if(tickets.some(t=>ticketHitOrder(t,o)))sum+=p}return clamp(sum,0,1)}
-function ticketRecommendations(rows,comboOdds={},targetRoi=1.20){const ba=combinationAdvice(rows,comboOdds,targetRoi),single=rows.slice(0,4).map(x=>({type:'単勝',key:String(x.h.number),numbers:[x.h.number],prob:x.prob,odds:x.odds,ev:x.ev,need:targetRoi/Math.max(x.prob,1e-9)}));const score=x=>x.odds!=null?(x.ev??0):x.prob;return {single:single.sort((a,b)=>score(b)-score(a)).slice(0,2),wide:ba.wide.slice().sort((a,b)=>score(b)-score(a)).slice(0,3),quinella:ba.quinella.slice().sort((a,b)=>score(b)-score(a)).slice(0,3),trio:ba.trio.slice().sort((a,b)=>score(b)-score(a)).slice(0,2)}}
+function ticketRecommendations(rows,comboOdds={},targetRoi=1.20){
+  const ba=combinationAdvice(rows,comboOdds,targetRoi);
+  // 単勝は1.10.1の選び方を維持
+  const single=rows.slice(0,4).map(x=>({type:'単勝',key:String(x.h.number),numbers:[x.h.number],prob:x.prob,odds:x.odds,ev:x.ev,need:targetRoi/Math.max(x.prob,1e-9)}));
+  const oldScore=x=>x.odds!=null?(x.ev??0):x.prob;
+  const singleOut=single.sort((a,b)=>oldScore(b)-oldScore(a)).slice(0,2);
+
+  // 組み合わせ券種は「高EVだけ」を追わず、AI上位馬の組み合わせを優先
+  const top=rows.slice(0,4).map(x=>x.h.number),a=top[0],b=top[1],c=top[2],d=top[3];
+  const key2=(x,y)=>comboKey([x,y]),key3=(x,y,z)=>comboKey([x,y,z]);
+  const allowedWide=new Set([key2(a,b),key2(a,c),key2(b,c),d!=null?key2(a,d):'']);
+  const allowedQuinella=new Set([key2(a,b),key2(a,c),key2(b,c)]);
+  const allowedTrio=new Set([key3(a,b,c),d!=null?key3(a,b,d):'',d!=null?key3(a,c,d):'']);
+
+  const stableScore=x=>{
+    const p=Math.max(Number(x.prob)||0,1e-9);
+    const ev=x.ev==null?1:clamp(Number(x.ev),.70,1.80);
+    // 的中確率を主、EVは副。長穴EVだけで上に来るのを抑える。
+    return p*Math.pow(ev,.28)
+  };
+  const select=(arr,allowed,n)=>arr.filter(x=>allowed.has(x.key)).sort((x,y)=>stableScore(y)-stableScore(x)||((y.ev??0)-(x.ev??0))).slice(0,n);
+
+  let wide=select(ba.wide,allowedWide,2);
+  let quinella=select(ba.quinella,allowedQuinella,2);
+  let trio=select(ba.trio,allowedTrio,1);
+
+  // 万一候補が不足したら確率上位から補う
+  if(wide.length<2)wide=ba.wide.slice().sort((x,y)=>y.prob-x.prob).slice(0,2);
+  if(quinella.length<2)quinella=ba.quinella.slice().sort((x,y)=>y.prob-x.prob).slice(0,2);
+  if(!trio.length)trio=ba.trio.slice().sort((x,y)=>y.prob-x.prob).slice(0,1);
+
+  return {single:singleOut,wide,quinella,trio}
+}
 function targetPlan(rows,comboOdds={},opts={}){
  const budget=Math.max(100,Math.floor((Number(opts.budget)||1000)/100)*100),targetRoi=Number(opts.targetRoi)||1.20,targetHit=Number(opts.targetHit)||.70,maxTickets=Math.max(1,Math.min(5,Math.floor(budget/100)));
  const rec=ticketRecommendations(rows,comboOdds,targetRoi),anchor=rows[0]?.h.number,top4=new Set(rows.slice(0,4).map(x=>x.h.number));
@@ -336,11 +368,33 @@ function ticketNumbers(t){if(Array.isArray(t?.numbers)&&t.numbers.length)return 
 function historyResult(x){const r=x?.result||{};return {first:Number(r.first??x?.winner)||null,second:Number(r.second)||null,third:Number(r.third)||null}}
 function canonType(t){return t==='馬連'?'馬複':t}
 function historyTickets(x){const out=[];for(const t of x?.tickets||[])if(t?.type&&t?.key!=null)out.push({...t,type:canonType(t.type),numbers:ticketNumbers(t)});if(x?.pick!=null&&!out.some(t=>t.type==='単勝'))out.unshift({type:'単勝',key:String(x.pick),numbers:[Number(x.pick)],ev:x.ev??null});const seen=new Set();return out.filter(t=>{const k=t.type+'|'+t.key;if(seen.has(k))return false;seen.add(k);return true})}
-function ticketGrade(t,result){const nums=ticketNumbers(t),r=result||{};const first=Number(r.first)||null,second=Number(r.second)||null,third=Number(r.third)||null;if(t.type==='単勝'){if(!first||nums.length<1)return null;return nums[0]===first}if(t.type==='馬複'||t.type==='馬連'){if(!first||!second||nums.length<2)return null;const a=nums.slice(0,2).sort((x,y)=>x-y),b=[first,second].sort((x,y)=>x-y);return a[0]===b[0]&&a[1]===b[1]}if(t.type==='ワイド'){if(!first||!second||!third||nums.length<2)return null;const top=new Set([first,second,third]);return top.has(nums[0])&&top.has(nums[1])}if(t.type==='三連複'){if(!first||!second||!third||nums.length<3)return null;const a=nums.slice(0,3).sort((x,y)=>x-y),b=[first,second,third].sort((x,y)=>x-y);return a.every((v,i)=>v===b[i])}return null}
-function typeAccuracy(history,type){let hits=0,total=0,raceHits=0,raceTotal=0;for(const x of history||[]){const result=historyResult(x),ts=historyTickets(x).filter(t=>t.type===type);if(!ts.length)continue;let graded=0,hitAny=false;for(const t of ts){const g=ticketGrade(t,result);if(g==null)continue;graded++;total++;if(g){hits++;hitAny=true}}if(graded){raceTotal++;if(hitAny)raceHits++}}return {type,hits,total,rate:total?hits/total:null,raceHits,raceTotal,raceRate:raceTotal?raceHits/raceTotal:null}}
+function ticketGrade(t,result){
+  const type=canonType(t?.type),nums=[...new Set(ticketNumbers(t).map(Number).filter(Number.isFinite))],r=result||{};
+  const first=Number(r.first)||null,second=Number(r.second)||null,third=Number(r.third)||null;
+  if(type==='単勝'){if(!first||nums.length<1)return null;return nums[0]===first}
+  if(type==='馬複'){if(!first||!second||nums.length<2)return null;const a=nums.slice(0,2).sort((x,y)=>x-y),b=[first,second].sort((x,y)=>x-y);return a[0]===b[0]&&a[1]===b[1]}
+  if(type==='ワイド'){if(!first||!second||!third||nums.length<2)return null;const top=new Set([first,second,third]);return top.has(nums[0])&&top.has(nums[1])}
+  if(type==='三連複'){if(!first||!second||!third||nums.length<3)return null;const a=nums.slice(0,3).sort((x,y)=>x-y),b=[first,second,third].sort((x,y)=>x-y);return a.every((v,i)=>v===b[i])}
+  return null
+}
+function typeAccuracy(history,type){
+  type=canonType(type);let hits=0,total=0,raceHits=0,raceTotal=0,withOdds=0,stake=0,payout=0;
+  for(const x of history||[]){
+    const result=historyResult(x),ts=allSuggestedTickets(x).filter(t=>canonType(t.type)===type);
+    if(!ts.length)continue;
+    let graded=0,hitAny=false;
+    for(const t of ts){
+      const g=ticketGrade(t,result);if(g==null)continue;
+      graded++;total++;if(g){hits++;hitAny=true}
+      const o=Number(t.odds);if(Number.isFinite(o)&&o>=1){withOdds++;stake+=100;if(g)payout+=100*o}
+    }
+    if(graded){raceTotal++;if(hitAny)raceHits++}
+  }
+  return {type,hits,total,rate:total?hits/total:null,raceHits,raceTotal,raceRate:raceTotal?raceHits/raceTotal:null,withOdds,stake,payout,roi:stake?payout/stake:null}
+}
 function allTypeAccuracy(history){return ['単勝','馬複','ワイド','三連複'].map(type=>typeAccuracy(history,type))}
 function normalizeStoredTicket(t){if(!t)return null;if(t.type)return {...t,type:canonType(t.type),numbers:ticketNumbers(t)};if(t.t)return {type:canonType(t.t),key:String(t.k??''),numbers:Array.isArray(t.n)?t.n.map(Number):ticketNumbers({key:t.k}),ev:t.e==null?null:Number(t.e),prob:t.p==null?null:Number(t.p),odds:t.o==null?null:Number(t.o)};return null}
-function backtestTickets(x){const a=(x?.backtestTickets||[]).map(normalizeStoredTicket).filter(Boolean);return a.length?a:historyTickets(x)}
+function backtestTickets(x){const a=allSuggestedTickets(x);return a.length?a:historyTickets(x)}
 function allSuggestedTickets(x){
   const source=(x?.aiTickets&&x.aiTickets.length)?x.aiTickets:(x?.backtestTickets&&x.backtestTickets.length)?x.backtestTickets:historyTickets(x);
   const out=[],seen=new Set();
@@ -370,6 +424,8 @@ function suggestedStats(history){
   }
   return {tickets,graded,hits,rate:graded?hits/graded:null,races,raceHits,raceRate:races?raceHits/races:null,withOdds,stake,payout,roi:stake?payout/stake:null}
 }
+function currentModelHistory(history,prefix='1.11'){return (history||[]).filter(x=>String(x?.modelVersion||'').startsWith(prefix))}
+
 function aiTop3(x){
   if(Array.isArray(x?.aiTop3)&&x.aiTop3.length)return x.aiTop3.slice(0,3).map((z,i)=>({rank:i+1,number:Number(z.number??z.n),name:z.name||'',score:z.score??null,grade:z.grade||''}));
   return []
@@ -393,4 +449,4 @@ function groupBacktest(history,dimension,filters={}){const rows=backtestRows(his
 function goalStats(history){let races=0,raceHits=0,stake=0,payout=0;for(const x of history||[]){const result=historyResult(x),ts=historyTickets(x);if(!ts.length||!result.first)continue;races++;let any=false;for(const t of ts){const g=ticketGrade(t,result);if(g==null)continue;if(g)any=true;const o=Number(t.odds);if(Number.isFinite(o)&&o>=1){stake+=100;if(g)payout+=100*o}}if(any)raceHits++}return {races,raceHits,hitRate:races?raceHits/races:null,stake,payout,roi:stake?payout/stake:null,targetHit:.70,targetRoi:1.20}}
 function walkForward(history,filters={}){const entries=(history||[]).filter(x=>historyResult(x).first!=null&&backtestTickets(x).some(t=>normalizeStoredTicket(t)?.odds!=null&&normalizeStoredTicket(t)?.ev!=null)).slice().sort((a,b)=>String(a.date||a.createdAt||a.id).localeCompare(String(b.date||b.createdAt||b.id)));if(entries.length<6)return {enough:false,races:entries.length};const cut=Math.max(3,Math.floor(entries.length*.7)),train=entries.slice(0,cut),test=entries.slice(cut),thresholds=[1.0,1.1,1.2,1.3],minTickets=Math.max(5,Math.floor(train.length*.6));const candidates=thresholds.map(th=>({threshold:th,...summarizeBacktest(train,{...filters,minEv:th})})).filter(x=>x.withOdds>=minTickets&&x.roi!=null);if(!candidates.length)return {enough:false,races:entries.length,reason:'tickets'};candidates.sort((a,b)=>b.roi-a.roi||b.threshold-a.threshold);const best=candidates[0],validation=summarizeBacktest(test,{...filters,minEv:best.threshold});return {enough:true,races:entries.length,trainRaces:train.length,testRaces:test.length,threshold:best.threshold,train:best,validation}}
 function parse(raw){const p=parsePayload(raw);return parseNAR(p)||parseJRA(p)}
-const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,racePerformance,trendScore,parseOddsText,parseOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,suggestedRaceStats,suggestedStats,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
+const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,racePerformance,trendScore,parseOddsText,parseOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);

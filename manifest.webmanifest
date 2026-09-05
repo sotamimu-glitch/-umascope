@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.10.1",
+  "name": "UmaScope Free AutoBet 1.11",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "レース結果反映を修正し、AI予想と実結果・全提示買い目の均等買い成績を即時更新する競馬分析PWA"
+  "description": "券種別成績をAI提示買い目基準に統一し、単勝を維持しながらワイド・馬複・三連複を上位馬中心に再設計した競馬分析PWA"
 }

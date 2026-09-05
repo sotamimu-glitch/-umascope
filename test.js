@@ -44,3 +44,59 @@ console.log('v1.9 tests: ALL OK');
  if(!c.top1||c.top3Hits!==2)throw Error('v1.10 comparison '+JSON.stringify(c));
  console.log('v1.10 AI-vs-result/all-suggested: OK',s,c.top1,c.top3Hits);
 }
+
+
+// v1.11 ticket grading / unified stats / stable combo regression
+{
+  const res={first:3,second:7,third:5};
+  if(!C.ticketGrade({type:'ワイド',key:'5-3',numbers:[5,3]},res))throw Error('v1.11 wide reverse-order hit failed');
+  if(C.ticketGrade({type:'ワイド',key:'2-3',numbers:[2,3]},res))throw Error('v1.11 wide miss failed');
+  if(!C.ticketGrade({type:'馬連',key:'7-3',numbers:[7,3]},res))throw Error('v1.11 quinella reverse-order hit failed');
+  if(!C.ticketGrade({type:'三連複',key:'7-5-3',numbers:[7,5,3]},res))throw Error('v1.11 trio reverse-order hit failed');
+
+  const hist=[{
+    modelVersion:'1.11-stable-combo',
+    aiTickets:[
+      {type:'単勝',key:'3',numbers:[3],odds:3.0},
+      {type:'ワイド',key:'3-5',numbers:[3,5],odds:2.0},
+      {type:'馬複',key:'3-7',numbers:[3,7],odds:5.0},
+      {type:'三連複',key:'3-5-7',numbers:[3,5,7],odds:8.0}
+    ],
+    tickets:[],
+    result:res
+  }];
+  for(const typ of ['単勝','ワイド','馬複','三連複']){
+    const s=C.typeAccuracy(hist,typ);
+    if(s.total!==1||s.hits!==1)throw Error('v1.11 unified type stats '+typ+' '+JSON.stringify(s));
+  }
+  const bt=C.summarizeBacktest(hist,{type:'ワイド'});
+  if(bt.total!==1||bt.hits!==1||Math.abs(bt.roi-2)>1e-9)throw Error('v1.11 unified backtest '+JSON.stringify(bt));
+  console.log('v1.11 grading/unified stats: OK');
+}
+{
+  const rows=[
+    {h:{number:1},prob:.30,odds:4,ev:1.2},
+    {h:{number:2},prob:.24,odds:5,ev:1.2},
+    {h:{number:3},prob:.18,odds:7,ev:1.26},
+    {h:{number:4},prob:.12,odds:12,ev:1.44},
+    {h:{number:5},prob:.08,odds:25,ev:2.0},
+    {h:{number:6},prob:.08,odds:30,ev:2.4}
+  ];
+  const comboOdds={quinella:{},wide:{},trio:{}};
+  // Populate all combo odds uniformly enough for EV calculation.
+  const ns=rows.map(x=>x.h.number);
+  for(let i=0;i<ns.length;i++)for(let j=i+1;j<ns.length;j++){
+    const k=[ns[i],ns[j]].sort((a,b)=>a-b).join('-');
+    comboOdds.quinella[k]=8; comboOdds.wide[k]=3;
+  }
+  for(let i=0;i<ns.length;i++)for(let j=i+1;j<ns.length;j++)for(let k=j+1;k<ns.length;k++){
+    comboOdds.trio[[ns[i],ns[j],ns[k]].sort((a,b)=>a-b).join('-')]=18;
+  }
+  const rec=C.ticketRecommendations(rows,comboOdds,1.2);
+  const allowedWide=new Set(['1-2','1-3','2-3','1-4']);
+  const allowedQ=new Set(['1-2','1-3','2-3']);
+  if(rec.wide.some(x=>!allowedWide.has(x.key)))throw Error('v1.11 wide not top-rank centered '+JSON.stringify(rec.wide));
+  if(rec.quinella.some(x=>!allowedQ.has(x.key)))throw Error('v1.11 quinella not top-rank centered '+JSON.stringify(rec.quinella));
+  if(rec.trio.length!==1||!['1-2-3','1-2-4','1-3-4'].includes(rec.trio[0].key))throw Error('v1.11 trio not top-rank centered '+JSON.stringify(rec.trio));
+  console.log('v1.11 stable combo selection: OK', rec.wide.map(x=>x.key),rec.quinella.map(x=>x.key),rec.trio.map(x=>x.key));
+}
