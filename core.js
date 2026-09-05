@@ -45,7 +45,7 @@ let tr=s.match(/(\d{3,4})\s*(芝|ダート|ダ)/);if(tr){distance=Number(tr[1]);
 if(!distance)return null;
 let going='';const tail=s.slice(tr.index+tr[0].length);const gm=tail.match(/(?:\d+[:.]\d+(?:\.\d+)?\s+)?(良|稍重|重|不良)/);if(gm)going=gm[1];
 let margin=null;const ms=[...s.matchAll(/[（(]([0-9]+(?:\.[0-9]+)?)[）)]/g)];if(ms.length)margin=Number(ms[ms.length-1][1]);
-return {date:`${dm[1]}-${String(dm[2]).padStart(2,'0')}-${String(dm[3]).padStart(2,'0')}`,course:dm[4],finish:Number(fm[1]),field:Number(field[1]),pop:pop?Number(pop[1]):null,jockey,weight:wm?Number(wm[1]):null,distance,surface,going,margin}
+const cm=s.match(/(?:^|\s)(\d{1,2}(?:[-－−]\d{1,2}){1,3})(?:\s|$)/),corners=cm?cm[1].split(/[-－−]/).map(Number):[];return {date:`${dm[1]}-${String(dm[2]).padStart(2,'0')}-${String(dm[3]).padStart(2,'0')}`,course:dm[4],finish:Number(fm[1]),field:Number(field[1]),pop:pop?Number(pop[1]):null,jockey,weight:wm?Number(wm[1]):null,distance,surface,going,margin,corners}
 }
 function cellText(c){return norm(typeof c==='string'?c:(c&&c.text)||'')}
 function cellHtml(c){return typeof c==='object'&&c?String(c.html||''):''}
@@ -176,26 +176,28 @@ function inferNarDate(mm,dd,raceDate){
 function parseNarPasts(block,raceDate=''){
   const lines=narNormText(block).split('\n').map(norm).filter(Boolean),a=[];
   for(let i=0;i<lines.length;i++){
-    const m=lines[i].match(/^([^\d\s]{1,10})(\d{2})\.(\d{2})\s+(良|稍重|重|不良)\s*(?:ナ\s*)?(?:(芝)\s*)?(右|左|直)\s*(\d{3,4})\b/);
+    const m=lines[i].match(/^([^\d\s]{1,12})(\d{1,2})\.(\d{1,2})\s*(良|稍重|重|不良)\s*(?:ナ\s*)?(?:(芝)\s*)?(右|左|直)\s*(\d{3,4})\b/);
     if(!m)continue;
-    let finish=null,field=null,pop=null,jockey='',weight=null,margin=null;
-    for(let j=i+1;j<Math.min(lines.length,i+5);j++){
-      const f=lines[j].match(/^(\d{1,2})\/(\d{1,2})\s+(\d{1,2})人\s+([^\s]+)\s+(?:★|▲|△|☆|◇)?\s*(\d{2}(?:\.\d)?)/);
-      if(f){finish=Number(f[1]);field=Number(f[2]);pop=Number(f[3]);jockey=cleanJockey(f[4]);weight=Number(f[5]);break}
+    let finish=null,field=null,pop=null,jockey='',weight=null,margin=null,corners=[];
+    for(let j=i+1;j<Math.min(lines.length,i+7);j++){
+      const f=lines[j].match(/^(\d{1,2})\/(\d{1,2})\s*(\d{1,2})人\s*([★▲△☆◇]?)([^\s]+)\s*(\d{2}(?:\.\d)?)/);
+      if(f){finish=Number(f[1]);field=Number(f[2]);pop=Number(f[3]);jockey=cleanJockey((f[4]||'')+f[5]);weight=Number(f[6]);break}
       if(/^(?:出走取消|競走除外|競走中止|取消|除外|中止)/.test(lines[j]))break;
     }
-    for(let j=i+1;j<Math.min(lines.length,i+7);j++){
-      const mg=lines[j].match(/[（(]([0-9]+(?:\.[0-9]+)?)[）)]/);
-      if(mg){margin=Number(mg[1]);break}
+    for(let j=i+1;j<Math.min(lines.length,i+9);j++){
+      const mg=lines[j].match(/[（(]([0-9]+(?:\.[0-9]+)?)[）)]/);if(mg&&margin==null)margin=Number(mg[1]);
+      const cm=lines[j].match(/(?:^|\s)(\d{1,2}(?:[-－−]\d{1,2}){1,3})(?:\s|$)/);
+      if(cm&&!corners.length)corners=cm[1].split(/[-－−]/).map(Number).filter(Number.isFinite);
     }
-    if(finish!=null)a.push({date:inferNarDate(m[2],m[3],raceDate),course:m[1].replace(/^Ｊ/,''),finish,field,pop,jockey,weight,distance:Number(m[7]),surface:m[5]?'芝':'ダ',going:m[4],margin})
+    if(finish!=null)a.push({date:inferNarDate(m[2],m[3],raceDate),course:m[1].replace(/^Ｊ/,''),finish,field,pop,jockey,weight,distance:Number(m[7]),surface:m[5]?'芝':'ダ',going:m[4],margin,corners})
   }
   return a.slice(0,5)
 }
+function parseNarPastLegacy(s){s=norm(narNormText(String(s||'')).replace(/\n+/g,' '));const m=s.match(/(?:^|\s)(\d{1,2})\s+(\d{2})\.(\d{2})\.(\d{2})\s*(良|稍重|重|不良)\s*(\d{1,2})頭\s*([^\s]+)\s*(?:ナ)?\s*(右|左|直)\s*(\d{3,4})/);if(!m)return null;const tail=s.slice((m.index||0)+m[0].length);const pj=tail.match(/(\d{1,2})人\s+\d+\s+([ぁ-んァ-ヶー一-龠々・A-Za-z.]+)\s*(?:★|▲|△|☆|◇)?\s*(\d{2}(?:\.\d)?)/);const mg=tail.match(/[（(]([0-9]+(?:\.[0-9]+)?)[）)]/);const cm=tail.match(/(?:^|\s)(\d{1,2}(?:[-－−]\d{1,2}){1,3})(?:\s|$)/);return {date:`20${m[2]}-${m[3]}-${m[4]}`,course:m[7].replace(/^Ｊ/,''),finish:Number(m[1]),field:Number(m[6]),pop:pj?Number(pj[1]):null,jockey:pj?pj[2]:'',weight:pj?Number(pj[3]):null,distance:Number(m[9]),surface:null,going:m[5],margin:mg?Number(mg[1]):null,corners:cm?cm[1].split(/[-－−]/).map(Number):[]}}
+function parseNarPastCell(s,raceDate=''){const a=parseNarPasts(String(s||''),raceDate);return a[0]||parseNarPastLegacy(s)}
 function narHorseRow(c){if(c.length>=4&&/^\d{1,2}$/.test(fwDigits(c[0]))&&/^\d{1,2}$/.test(fwDigits(c[1])))return {frame:Number(fwDigits(c[0])),number:Number(fwDigits(c[1])),horseIdx:2,jockeyIdx:3};if(c.length>=3&&/^\d{1,2}$/.test(fwDigits(c[0]))&&!/^\d{1,2}$/.test(fwDigits(c[1])))return {frame:null,number:Number(fwDigits(c[0])),horseIdx:1,jockeyIdx:2};return null}
-function narName(s){s=norm(s);const m=s.match(/^(.+?)(?:\s+(?:牡|牝|セン|せん|騸)\s*\d|$)/);return norm(m?m[1]:s).split('\n')[0]}
+function narName(s){const lines=String(s||'').split('\n').map(norm).filter(Boolean);for(let i=0;i<lines.length;i++){if(/(?:牡|牝|セン|せん|騸)\s*\d/.test(lines[i])&&lines[i+1])return lines[i+1].replace(/^Image:\s*/,'').trim()}s=norm(s);const m=s.match(/^(.+?)(?:\s+(?:牡|牝|セン|せん|騸)\s*\d|$)/);return norm(m?m[1]:s).split('\n')[0]}
 function narJockey(s){s=norm(s);return norm((s.split(/\n/)[0]||s).replace(/[（(].*$/,'').replace(/^\s*[★▲△☆◇]/,''))}
-function parseNarPastCell(s){s=norm(narNormText(String(s||'')).replace(/\n+/g,' '));const m=s.match(/(?:^|\s)(\d{1,2})\s+(\d{2})\.(\d{2})\.(\d{2})\s*(良|稍重|重|不良)\s*(\d{1,2})頭\s*([^\s]+)\s*(?:ナ)?\s*(右|左|直)\s*(\d{3,4})/);if(!m)return null;const tail=s.slice((m.index||0)+m[0].length);const pj=tail.match(/(\d{1,2})人\s+\d+\s+([ぁ-んァ-ヶー一-龠々・A-Za-z.]+)\s*(?:★|▲|△|☆|◇)?\s*(\d{2}(?:\.\d)?)/);const mg=tail.match(/[（(]([0-9]+(?:\.[0-9]+)?)[）)]/);return {date:`20${m[2]}-${m[3]}-${m[4]}`,course:m[7].replace(/^Ｊ/,''),finish:Number(m[1]),field:Number(m[6]),pop:pj?Number(pj[1]):null,jockey:pj?pj[2]:'',weight:pj?Number(pj[3]):null,distance:Number(m[9]),surface:null,going:m[5],margin:mg?Number(mg[1]):null}}
 function mergeHorse(base,extra){if(!base)return extra;if(!extra)return base;return {...base,frame:base.frame??extra.frame??null,name:base.name||extra.name,jockey:base.jockey||extra.jockey,weight:base.weight??extra.weight,odds:base.odds??extra.odds,recent:(base.recent&&base.recent.length)?base.recent:(extra.recent||[]),records:Object.keys(base.records||{}).length?base.records:(extra.records||{})}}
 function parseNarTextHorses(t,raceDate=''){
   t=narNormText(t);const map=new Map();
@@ -224,18 +226,18 @@ function parseNarTextHorses(t,raceDate=''){
   return map
 }
 function parseNAR(p){
-  const t=narNormText(p.narDetailText||p.text||'');
+  const t=narNormText([p.narDetailText||'',...(p.narRows||[]),p.text||''].filter(Boolean).join('\n'));
   if(!((p.url||'').includes('keiba.go.jp')||/地方競馬情報サイト/.test(t)||/第\s*\d{1,2}競走/.test(t)||/\d+Ｒ\s*出\s*馬\s*表/.test(t)))return null;
   const r=parseHeaderNAR(t),map=parseNarTextHorses(t,r.date);
   for(const table of narPayloadTables(p)){
     const rows=table.map(row=>row.map(cellText)),flat=rows.flat().join(' ');
-    if(!/馬番/.test(flat)||!/競走馬|馬名|馬\s*名/.test(flat))continue;
+    if(!/馬\s*番/.test(flat)||!/競走馬|馬\s*名/.test(flat))continue;
     for(const c of rows){
       const shp=narHorseRow(c);if(!shp||shp.number<1||shp.number>20)continue;
       const horseCell=c[shp.horseIdx]||'',jockeyCell=c[shp.jockeyIdx]||'',name=narName(horseCell);
       if(!name||/馬名|競走馬/.test(name)||/^\d+$/.test(name))continue;
       const jm=jockeyCell.match(/[（(]\s*[★▲△☆◇]?\s*(\d{2}(?:\.\d)?)[）)]/);
-      const recent=c.map(parseNarPastCell).filter(Boolean).slice(0,5);
+      const recent=[];for(const z of c){for(const pr of parseNarPasts(z,r.date)){const k=[pr.date,pr.course,pr.finish,pr.distance].join('|');if(!recent.some(x=>[x.date,x.course,x.finish,x.distance].join('|')===k))recent.push(pr)}const legacy=parseNarPastLegacy(z);if(legacy){const k=[legacy.date,legacy.course,legacy.finish,legacy.distance].join('|');if(!recent.some(x=>[x.date,x.course,x.finish,x.distance].join('|')===k))recent.push(legacy)}}recent.sort((a,b)=>String(b.date).localeCompare(String(a.date)));recent.splice(5);
       let odds=null;for(const z of c.slice(shp.jockeyIdx+1)){const om=z.match(/^\s*(\d{1,3}(?:\.\d+)?)\s*(?:\n|\s|\()/);if(om&&Number(om[1])>=1){odds=Number(om[1]);break}}
       const recCell=c.find(x=>/全\s*\d+\s*-/.test(x))||'';
       const h={number:shp.number,frame:shp.frame,name,jockey:narJockey(jockeyCell),weight:jm?Number(jm[1]):null,odds,recent,records:{all:rec4(recCell,'全'),venue:rec4(recCell,'場'),distance:rec4(recCell,'距')}};
@@ -259,135 +261,52 @@ function finishScore(x){if(!x||!x.finish)return null;if(x.field&&x.field>1)retur
 function weighted(vals){let s=0,w=0;vals.forEach((v,i)=>{if(v==null||!Number.isFinite(Number(v)))return;const ww=Math.pow(.82,i);s+=Number(v)*ww;w+=ww});return w?s/w:null}
 function weightedCustom(items){let s=0,w=0;for(const it of items){if(it?.v==null||!Number.isFinite(Number(it.v))||!it.w)continue;s+=Number(it.v)*it.w;w+=it.w}return w?s/w:null}
 function recordScore(rec){if(!rec)return null;const [w,p3,p2,o]=rec;const n=w+p3+p2+o;if(!n)return null;return clamp(3+7*(w+.55*p3+.3*p2)/n,1,10)}
-function marginScoreOne(x){
-  if(!x||x.margin==null||!Number.isFinite(Number(x.margin)))return null;
-  const m=Math.max(0,Number(x.margin));
-  if(Number(x.finish)===1)return clamp(8.3+Math.min(m,1.5)*1.0,7.5,9.8);
-  return clamp(8.8-m*1.65,1,9)
+function marginScoreOne(x){if(!x||x.margin==null||!Number.isFinite(Number(x.margin)))return null;const m=Math.max(0,Number(x.margin));if(Number(x.finish)===1)return clamp(8.3+Math.min(m,1.5),7.5,9.8);return clamp(8.8-m*1.65,1,9)}
+function popularityScoreOne(x){if(!x?.finish||!x?.pop)return null;const field=Math.max(Number(x.field)||Math.max(x.finish,x.pop),2),out=Number(x.pop)-Number(x.finish),popStrength=10-9*(Number(x.pop)-1)/(field-1);return clamp(5+out*.62+(popStrength-5)*.12,1,10)}
+function racePerformance(x){return weightedCustom([{v:finishScore(x),w:.48},{v:marginScoreOne(x),w:.32},{v:popularityScoreOne(x),w:.20}])??5}
+function trendScore(recent){const vals=(recent||[]).slice(0,4).map(racePerformance).filter(Number.isFinite);if(vals.length<2)return 5;const a=vals.slice().reverse(),n=a.length,mx=(n-1)/2,my=a.reduce((s,v)=>s+v,0)/n;let num=0,den=0;for(let i=0;i<n;i++){num+=(i-mx)*(a[i]-my);den+=(i-mx)**2}return clamp(5+(den?num/den:0)*1.35,1,10)}
+function goingSimilarity(a,b){if(!a||!b)return 0;const ix={良:0,稍重:1,重:2,不良:3};if(ix[a]==null||ix[b]==null)return a===b?1:0;return [1,.72,.38,.18][Math.abs(ix[a]-ix[b])]??0}
+function normJockey(s){return String(s||'').replace(/\s/g,'').replace(/^[★▲△☆◇]/,'')}
+function rawFeatures(h,r){
+ const recent=(h.recent||[]).slice(0,20),latest=recent[0]||null;
+ const margin=weighted(recent.map(marginScoreOne))??5,popularity=weighted(recent.map(popularityScoreOne))??5,field=weighted(recent.map(finishScore))??5;
+ let distance=5;if(r.distance&&latest?.distance){const delta=Math.abs(Number(r.distance)-Number(latest.distance)),change=clamp(8.6-delta/115,2.2,8.6),near=weighted(recent.map(x=>x.distance&&Math.abs(Number(x.distance)-Number(r.distance))<=200?racePerformance(x):null));distance=near==null?change:.55*change+.45*near}
+ const sameSurface=recent.filter(x=>x.surface&&r.surface&&x.surface===r.surface);let surface=5;if(r.surface){if(sameSurface.length)surface=weighted(sameSurface.map(racePerformance))??5;else if(latest?.surface)surface=latest.surface===r.surface?5.8:4.2}
+ let going=5;if(r.going){const gv=recent.map((x,i)=>({v:racePerformance(x),w:goingSimilarity(x.going,r.going)*Math.pow(.82,i)})).filter(x=>x.w>0);going=weightedCustom(gv)??5}
+ const sameJ=recent.filter(x=>h.jockey&&x.jockey&&(normJockey(x.jockey).includes(normJockey(h.jockey))||normJockey(h.jockey).includes(normJockey(x.jockey))));let jockey=5;if(sameJ.length)jockey=weighted(sameJ.map(racePerformance))??5;else if(h.jockey&&latest?.jockey&&normJockey(h.jockey)===normJockey(latest.jockey))jockey=5.6;
+ let frame=5;if(h.frame){const pos=(Number(h.frame)-1)/7;if(r.surface==='ダ'||Number(r.distance)<=1400)frame=clamp(6.25-1.45*pos,4.7,6.25);else if(r.surface==='芝'&&Number(r.distance)>=1800)frame=clamp(5.7-Math.abs(pos-.5)*1.15,5.05,5.7);else frame=clamp(5.55-Math.abs(pos-.45)*.8,5,5.55)}
+ let weight=5,weightDelta=null;const rw=recent.map(x=>x.weight).filter(x=>Number.isFinite(Number(x)));if(Number.isFinite(Number(h.weight))&&rw.length){const base=weighted(rw.map(Number));weightDelta=Number(h.weight)-Number(base);weight=clamp(5.4-weightDelta*.48,3.1,7.3)}
+ const trend=trendScore(recent),venue=recordScore(h.records?.venue),distRecord=recordScore(h.records?.distance);
+ return {recent,latest,margin,popularity,field,distance,surface,going,jockey,frame,weight,weightDelta,trend,venue,distRecord,sameJ:sameJ.length,evidence:recent.length}
 }
-function popularityScoreOne(x){
-  if(!x?.finish||!x?.pop)return null;
-  const field=Math.max(Number(x.field)||Math.max(x.finish,x.pop),2);
-  const outperform=Number(x.pop)-Number(x.finish);
-  const popStrength=10-9*(Number(x.pop)-1)/(field-1);
-  return clamp(5+outperform*.62+(popStrength-5)*.12,1,10)
+function cornerRatio(x){const cs=(x?.corners||[]).filter(Number.isFinite);if(!cs.length)return null;const f=Math.max(Number(x.field)||Math.max(...cs),2);return clamp((cs[0]-1)/(f-1),0,1)}
+function horseStyle(h){return weighted((h.recent||[]).slice(0,5).map(cornerRatio))}
+function paceIndex(h,r){const styles=r.horses.map(x=>horseStyle(x)).filter(v=>v!=null),hs=horseStyle(h);if(hs==null||styles.length<Math.max(3,Math.ceil(r.horses.length*.35)))return {score:50,detail:'位置取りデータ不足のため中立'};const front=styles.filter(v=>v<=.28).length,pressure=front/Math.max(styles.length,1);let score=50;if(pressure>=.34)score=50+(hs-.35)*45;else if(pressure<=.18)score=61-hs*38;else score=57-Math.abs(hs-.42)*28;if(h.frame&&Number(r.distance)<=1400)score+=(4.5-Number(h.frame))*.6;return {score:clamp(Math.round(score),20,85),detail:pressure>=.34?'先行馬が多く速い流れ想定':pressure<=.18?'先行馬が少なく前有利想定':'平均的な流れ想定'}}
+const INDEX_LABELS={ability:'能力指数',suitability:'適性指数',pace:'展開指数',jockey:'騎手指数',form:'調子指数',value:'妙味指数'};
+const MODEL_WEIGHTS={ability:.36,suitability:.25,pace:.13,jockey:.11,form:.15};
+function to100(v){return clamp(Math.round(Number(v||5)*10),10,100)}
+function sixIndices(h,r){
+ const f=rawFeatures(h,r),perf=weighted(f.recent.slice(0,6).map(racePerformance))??5;
+ const ability=to100(weightedCustom([{v:perf,w:.38},{v:f.margin,w:.24},{v:f.field,w:.20},{v:f.popularity,w:.18}]));
+ const suitability=to100(weightedCustom([{v:f.distance,w:.29},{v:f.surface,w:.24},{v:f.going,w:.20},{v:f.venue,w:.12},{v:f.distRecord,w:.10},{v:f.frame,w:.05}]));
+ const pace=paceIndex(h,r);
+ const jockey=to100(f.jockey);
+ const recent2=weighted(f.recent.slice(0,2).map(racePerformance))??5;
+ const form=to100(weightedCustom([{v:f.trend,w:.45},{v:recent2,w:.30},{v:f.weight,w:.15},{v:f.margin,w:.10}]));
+ const details={ability:`着差・着順/頭数・人気を統合（近走${Math.min(f.evidence,6)}走）`,suitability:`距離・芝ダ・馬場・コース/枠を統合`,pace:pace.detail,jockey:f.sameJ?`今回騎手との近走 ${f.sameJ}走を評価`:(h.jockey?'同騎手データが少なく中立寄り':'騎手情報不足'),form:`近3〜4走の推移＋直近内容${f.weightDelta!=null?`・斤量${f.weightDelta>=0?'+':''}${f.weightDelta.toFixed(1)}kg`:''}`,value:'オッズ取得後に推定確率との乖離を評価'};
+ const observed=[f.evidence>=2,!!(r.distance&&f.latest?.distance),!!r.surface,!!(r.going&&f.recent.some(x=>x.going)),f.sameJ>0,horseStyle(h)!=null,Number.isFinite(Number(h.weight))].filter(Boolean).length;
+ const confidence=clamp(.20+.075*observed+.02*Math.min(f.evidence,8),.22,.93);
+ return {ability,suitability,pace:pace.score,jockey,form,value:50,confidence,evidence:f.evidence,details,raw:f}
 }
-function racePerformance(x){
-  const a=[{v:finishScore(x),w:.50},{v:marginScoreOne(x),w:.30},{v:popularityScoreOne(x),w:.20}];
-  return weightedCustom(a)??5
-}
-function trendScore(recent){
-  const vals=(recent||[]).slice(0,4).map(racePerformance).filter(Number.isFinite);
-  if(vals.length<2)return 5;
-  const a=vals.slice().reverse(),n=a.length,meanX=(n-1)/2,meanY=a.reduce((s,v)=>s+v,0)/n;
-  let num=0,den=0;for(let i=0;i<n;i++){num+=(i-meanX)*(a[i]-meanY);den+=(i-meanX)**2}
-  const slope=den?num/den:0;
-  return clamp(5+slope*1.35,1,10)
-}
-function goingSimilarity(a,b){
-  if(!a||!b)return 0;
-  const ix={良:0,稍重:1,重:2,不良:3};if(ix[a]==null||ix[b]==null)return a===b?1:0;
-  const d=Math.abs(ix[a]-ix[b]);return [1,.72,.38,.18][d]??0
-}
-const FEATURE_WEIGHTS={margin:.16,popularity:.08,field:.08,distance:.12,surface:.10,going:.08,jockey:.10,frame:.05,weight:.07,trend:.16};
-const FEATURE_LABELS={margin:'着差',popularity:'人気',field:'頭数',distance:'距離変化',surface:'芝ダート',going:'馬場状態',jockey:'騎手',frame:'枠順',weight:'斤量',trend:'近走推移'};
-function overallScore(v){
-  const rating=Object.entries(FEATURE_WEIGHTS).reduce((sum,[k,w])=>sum+(Number(v?.[k])||5)*w,0);
-  return clamp(Math.round(rating*10),10,100)
-}
-function overallGrade(score){
-  const s=Number(score)||0;
-  return s>=80?'S':s>=70?'A':s>=60?'B':s>=50?'C':'D'
-}
-function judgement(v){
-  const score=overallScore(v);
-  return {score,grade:overallGrade(score)}
-}
-function autoFactors(h,r){
-  const recent=(h.recent||[]).slice(0,20),latest=recent[0]||null,details={};
-
-  const marginVals=recent.map(marginScoreOne),margin=weighted(marginVals)??5;
-  details.margin=marginVals.some(v=>v!=null)?`近走の着差を時間減衰評価`:'着差データ不足';
-
-  const popVals=recent.map(popularityScoreOne),popularity=weighted(popVals)??5;
-  details.popularity=popVals.some(v=>v!=null)?`人気より上に走った実績を評価`:'人気データ不足';
-
-  const fieldVals=recent.map(finishScore),field=weighted(fieldVals)??5;
-  details.field=fieldVals.some(v=>v!=null)?`頭数に対する着順位置を補正`:'頭数データ不足';
-
-  let distance=5;
-  if(r.distance&&latest?.distance){
-    const delta=Math.abs(Number(r.distance)-Number(latest.distance));
-    const changeBase=clamp(8.6-delta/115,2.2,8.6);
-    const target=weighted(recent.map(x=>x.distance&&Math.abs(Number(x.distance)-Number(r.distance))<=200?racePerformance(x):null));
-    distance=target==null?changeBase:.55*changeBase+.45*target;
-    details.distance=`前走から${Number(r.distance)-Number(latest.distance)>=0?'+':''}${Number(r.distance)-Number(latest.distance)}m${target!=null?'＋近似距離実績':''}`;
-  }else details.distance='距離データ不足';
-
-  const sameSurface=recent.filter(x=>x.surface&&r.surface&&x.surface===r.surface);
-  let surface=5;
-  if(r.surface){
-    if(sameSurface.length)surface=weighted(sameSurface.map(racePerformance))??5;
-    else if(latest?.surface)surface=latest.surface===r.surface?5.8:4.2;
-    details.surface=sameSurface.length?`${r.surface}の実績 ${sameSurface.length}走`:(latest?.surface?`前走${latest.surface}→今回${r.surface}`:'芝ダート実績不足');
-  }else details.surface='今回の芝ダート不明';
-
-  let going=5;
-  if(r.going){
-    const gv=recent.map((x,i)=>({v:racePerformance(x),w:goingSimilarity(x.going,r.going)*Math.pow(.82,i)})).filter(x=>x.w>0);
-    going=weightedCustom(gv)??5;
-    details.going=gv.length?`${r.going}に近い馬場 ${gv.length}走を評価`:'近い馬場の実績不足';
-  }else details.going='今回の馬場状態未発表';
-
-  const normJ=s=>String(s||'').replace(/\s/g,'').replace(/^[★▲△☆◇]/,'');
-  const sameJ=recent.filter(x=>h.jockey&&x.jockey&&(normJ(x.jockey).includes(normJ(h.jockey))||normJ(h.jockey).includes(normJ(x.jockey))));
-  let jockey=5;
-  if(sameJ.length)jockey=weighted(sameJ.map(racePerformance))??5;
-  else if(h.jockey&&latest?.jockey&&normJ(h.jockey)===normJ(latest.jockey))jockey=5.6;
-  details.jockey=sameJ.length?`${h.jockey}との近走 ${sameJ.length}走`:(h.jockey?'同騎手の近走実績が少ない':'騎手不明');
-
-  let frame=5;
-  if(h.frame){
-    const pos=(Number(h.frame)-1)/7;
-    if(r.surface==='ダ'||Number(r.distance)<=1400)frame=clamp(6.25-1.45*pos,4.7,6.25);
-    else if(r.surface==='芝'&&Number(r.distance)>=1800)frame=clamp(5.7-Math.abs(pos-.5)*1.15,5.05,5.7);
-    else frame=clamp(5.55-Math.abs(pos-.45)*.8,5.0,5.55);
-    details.frame=`${h.frame}枠（汎用的な軽い補正）`;
-  }else details.frame='枠順を取得できず中立';
-
-  let weight=5,weightDelta=null;
-  const rw=recent.map(x=>x.weight).filter(x=>Number.isFinite(Number(x)));
-  if(Number.isFinite(Number(h.weight))&&rw.length){
-    const base=weighted(rw.map(Number));
-    weightDelta=Number(h.weight)-Number(base);
-    weight=clamp(5.4-weightDelta*.48,3.1,7.3);
-    details.weight=`近走平均${base.toFixed(1)}kg → 今回${Number(h.weight).toFixed(1)}kg (${weightDelta>=0?'+':''}${weightDelta.toFixed(1)}kg)`;
-  }else details.weight=Number.isFinite(Number(h.weight))?`今回${Number(h.weight).toFixed(1)}kg・比較材料不足`:'斤量不明';
-
-  const trend=trendScore(recent);
-  details.trend=recent.length>=2?`直近${Math.min(4,recent.length)}走のパフォーマンス推移`:'推移データ不足';
-
-  const featureVals={margin,popularity,field,distance,surface,going,jockey,frame,weight,trend};
-  const observed=[
-    marginVals.some(v=>v!=null),popVals.some(v=>v!=null),fieldVals.some(v=>v!=null),
-    !!(r.distance&&latest?.distance),sameSurface.length>0,!!(r.going&&recent.some(x=>x.going)),
-    sameJ.length>0,!!h.frame,!!(Number.isFinite(Number(h.weight))&&rw.length),recent.length>=3
-  ].filter(Boolean).length;
-  const evidence=recent.length;
-  const confidence=clamp(.16+.052*observed+.025*Math.min(evidence,10),.18,.93);
-  return {...Object.fromEntries(Object.entries(featureVals).map(([k,v])=>[k,clamp(v,1,10)])),confidence,evidence,details,weightDelta}
-}
-function rank(r,overrides={}){
-  let rows=r.horses.map(h=>{
-    const auto=autoFactors(h,r),v={...auto,...(overrides[h.number]||{})};
-    const rating=Object.entries(FEATURE_WEIGHTS).reduce((sum,[k,w])=>sum+(Number(v[k])||5)*w,0);
-    const j=judgement(v);
-    return {h,auto,v,rating,score:j.score,grade:j.grade,odds:h.odds||null}
-  });
-  const temp=1.55,ex=rows.map(x=>Math.exp(x.rating/temp)),sum=ex.reduce((a,b)=>a+b,0);
-  const avgConf=rows.reduce((z,x)=>z+x.auto.confidence,0)/Math.max(1,rows.length),alpha=.28+.58*avgConf;
-  rows=rows.map((x,i)=>{const raw=ex[i]/sum,p=alpha*raw+(1-alpha)/rows.length;return {...x,prob:p,ev:x.odds?p*x.odds:null}});
-  return rows.sort((a,b)=>b.rating-a.rating)
+function modelScore(ix){return Math.round(Object.entries(MODEL_WEIGHTS).reduce((s,[k,w])=>s+(Number(ix?.[k])||50)*w,0))}
+function overallGrade(score){const s=Number(score)||0;return s>=80?'S':s>=70?'A':s>=60?'B':s>=50?'C':'D'}
+function valueIndex(ev){if(ev==null||!Number.isFinite(Number(ev)))return 50;return clamp(Math.round(50+(Number(ev)-1)*100),10,100)}
+function judgement(ix){const score=modelScore(ix);return {score,grade:overallGrade(score)}}
+function rank(r){
+ let rows=r.horses.map(h=>{const indices=sixIndices(h,r),score=modelScore(indices),rating=score/10;return {h,auto:indices,indices,rating,score,grade:overallGrade(score),odds:h.odds||null}});
+ const temp=1.55,ex=rows.map(x=>Math.exp(x.rating/temp)),sum=ex.reduce((a,b)=>a+b,0),avgConf=rows.reduce((z,x)=>z+x.auto.confidence,0)/Math.max(1,rows.length),alpha=.28+.58*avgConf;
+ rows=rows.map((x,i)=>{const raw=ex[i]/sum,p=alpha*raw+(1-alpha)/rows.length,ev=x.odds?p*x.odds:null,v=valueIndex(ev);return {...x,prob:p,ev,indices:{...x.indices,value:v}}});
+ return rows.sort((a,b)=>b.rating-a.rating)
 }
 function orderProb(order,by){let rem=1,p=1;for(const no of order){const q=by[no]||0;if(q<=0||rem<=0)return 0;p*=q/rem;rem-=q}return p}
 function perms(a){if(a.length<=1)return [a.slice()];const out=[];a.forEach((x,i)=>{for(const tail of perms(a.slice(0,i).concat(a.slice(i+1))))out.push([x,...tail])});return out}
@@ -395,102 +314,41 @@ function quinellaProb(a,b,by){return clamp(orderProb([a,b],by)+orderProb([b,a],b
 function trioProb(a,b,c,by){return clamp(perms([a,b,c]).reduce((s,o)=>s+orderProb(o,by),0),0,1)}
 function wideProb(a,b,by){let s=0;for(const k of Object.keys(by).map(Number))if(k!==a&&k!==b)s+=trioProb(a,b,k,by);return clamp(s,0,1)}
 function combinationAdvice(rows,comboOdds={},threshold=1.10){const by={};rows.forEach(x=>by[x.h.number]=x.prob);const nos=rows.map(x=>x.h.number);const q=[],w=[],t=[];
-for(let i=0;i<nos.length;i++)for(let j=i+1;j<nos.length;j++){const a=nos[i],b=nos[j],key=comboKey([a,b]);const qp=quinellaProb(a,b,by),wp=wideProb(a,b,by),qo=comboOdds.quinella?.[key]??null,wo=comboOdds.wide?.[key]??null;q.push({type:'馬連',key,numbers:[a,b],prob:qp,odds:qo,ev:qo?qp*qo:null,need:threshold/Math.max(qp,1e-9)});w.push({type:'ワイド',key,numbers:[a,b],prob:wp,odds:wo,ev:wo?wp*wo:null,need:threshold/Math.max(wp,1e-9)})}
+for(let i=0;i<nos.length;i++)for(let j=i+1;j<nos.length;j++){const a=nos[i],b=nos[j],key=comboKey([a,b]);const qp=quinellaProb(a,b,by),wp=wideProb(a,b,by),qo=comboOdds.quinella?.[key]??null,wo=comboOdds.wide?.[key]??null;q.push({type:'馬複',key,numbers:[a,b],prob:qp,odds:qo,ev:qo?qp*qo:null,need:threshold/Math.max(qp,1e-9)});w.push({type:'ワイド',key,numbers:[a,b],prob:wp,odds:wo,ev:wo?wp*wo:null,need:threshold/Math.max(wp,1e-9)})}
 for(let i=0;i<nos.length;i++)for(let j=i+1;j<nos.length;j++)for(let k=j+1;k<nos.length;k++){const a=nos[i],b=nos[j],c=nos[k],key=comboKey([a,b,c]),p=trioProb(a,b,c,by),o=comboOdds.trio?.[key]??null;t.push({type:'三連複',key,numbers:[a,b,c],prob:p,odds:o,ev:o?p*o:null,need:threshold/Math.max(p,1e-9)})}
 const sort=x=>x.sort((a,b)=>(b.ev??-1)-(a.ev??-1)||b.prob-a.prob);return {quinella:sort(q),wide:sort(w),trio:sort(t),threshold}}
-function realisticBets(rows,comboOdds={},opts={}){
-  const budget=Math.max(100,Math.floor((Number(opts.budget)||1000)/100)*100);
-  const baseEv=Number(opts.threshold)||1.08;
-  const avgConf=rows.reduce((z,x)=>z+(x.auto?.confidence||0),0)/Math.max(1,rows.length);
-  const extra=avgConf<.45?.08:avgConf<.60?.04:0;
-  const maxTickets=Math.max(1,Math.min(Math.floor(budget/100),avgConf<.45?2:avgConf<.60?3:5));
-  const top=rows.slice(0,4),anchor=top[0]?.h.number,topNos=new Set(top.slice(0,3).map(x=>x.h.number));
-  const ba=combinationAdvice(rows,comboOdds,baseEv+extra);
-  const candidates=[];
-
-  for(const x of rows.slice(0,3)){
-    if(x.odds!=null&&x.ev!=null&&x.ev>=baseEv+extra&&x.prob>=.09){
-      candidates.push({type:'単勝',key:String(x.h.number),numbers:[x.h.number],prob:x.prob,odds:x.odds,ev:x.ev,
-        utility:(x.ev-1)*Math.sqrt(x.prob)*.95,reason:'上位評価＋単勝期待値'})
-    }
-  }
-  for(const x of ba.wide){
-    if(x.odds!=null&&x.ev!=null&&x.ev>=1.05+extra&&x.prob>=.22&&(x.numbers.includes(anchor)||x.numbers.every(n=>topNos.has(n)))){
-      candidates.push({...x,utility:(x.ev-1)*Math.sqrt(x.prob)*1.18,reason:'軸中心のワイド'})
-    }
-  }
-  for(const x of ba.quinella){
-    if(x.odds!=null&&x.ev!=null&&x.ev>=1.08+extra&&x.prob>=.10&&(x.numbers.includes(anchor)||x.numbers.every(n=>topNos.has(n)))){
-      candidates.push({...x,utility:(x.ev-1)*Math.sqrt(x.prob),reason:'上位同士の馬連'})
-    }
-  }
-  for(const x of ba.trio){
-    const inTop=x.numbers.filter(n=>topNos.has(n)).length;
-    if(x.odds!=null&&x.ev!=null&&x.ev>=1.12+extra&&x.prob>=.045&&inTop>=2&&x.numbers.includes(anchor)){
-      candidates.push({...x,utility:(x.ev-1)*Math.sqrt(x.prob)*.72,reason:'軸＋上位中心の三連複'})
-    }
-  }
-
-  candidates.sort((a,b)=>b.utility-a.utility||b.ev-a.ev||b.prob-a.prob);
-  const chosen=[],typeCount={},usedTypes=new Set();
-  for(const c of candidates){
-    const cap=c.type==='単勝'?1:c.type==='三連複'?1:2;
-    if((typeCount[c.type]||0)>=cap)continue;
-    if(usedTypes.size>=2&&!usedTypes.has(c.type))continue;
-    chosen.push(c);typeCount[c.type]=(typeCount[c.type]||0)+1;usedTypes.add(c.type);
-    if(chosen.length>=maxTickets)break
-  }
-  // If the strongest two ticket types are weakly represented, allow one more type only in high-confidence races.
-  if(avgConf>=.72&&chosen.length<maxTickets&&usedTypes.size<3){
-    for(const c of candidates){
-      if(chosen.includes(c))continue;
-      const cap=c.type==='単勝'?1:c.type==='三連複'?1:2;
-      if((typeCount[c.type]||0)>=cap)continue;
-      chosen.push(c);typeCount[c.type]=(typeCount[c.type]||0)+1;usedTypes.add(c.type);break
-    }
-  }
-
-  const final=chosen.slice(0,maxTickets);
-  if(final.length){
-    const typeCap={単勝:.35,ワイド:.45,馬連:.35,三連複:.20};
-    const q=final.map(x=>Math.max(.01,x.utility)),sumQ=q.reduce((a,b)=>a+b,0);
-    const minStake=100,baseStake=minStake*final.length,remain=Math.max(0,budget-baseStake);
-    final.forEach((x,i)=>{
-      const raw=minStake+Math.floor((remain*q[i]/sumQ)/100)*100;
-      const cap=Math.max(100,Math.floor((budget*(typeCap[x.type]??.30))/100)*100);
-      x.amount=Math.min(raw,cap)
-    });
-    // 予算は上限。高リスク券種の上限に引っかかった余剰は無理に使い切らない。
-    let total=final.reduce((z,x)=>z+x.amount,0);
-    if(total>budget){
-      for(const x of final.slice().sort((a,b)=>a.utility-b.utility)){
-        while(total>budget&&x.amount>100){x.amount-=100;total-=100}
-      }
-    }
-  }
-
-  const watches=[];
-  const addWatch=(arr,type,minProb)=>{for(const x of arr){if(x.odds==null&&x.prob>=minProb&&(x.numbers.includes(anchor)||x.numbers.every(n=>topNos.has(n)))){watches.push({...x,type});if(watches.length>=4)return}}};
-  addWatch(ba.wide,'ワイド',.25);if(watches.length<4)addWatch(ba.quinella,'馬連',.12);if(watches.length<4)addWatch(ba.trio,'三連複',.06);
-
-  const stance=!final.length?'見送り':final.length<=2?'絞って勝負':final.length<=4?'標準':'分散';
-  return {tickets:final,watches:watches.slice(0,4),budget,confidence:avgConf,stance,anchor,maxTickets,threshold:baseEv+extra}
+function ticketHitOrder(t,o){const n=t.numbers||[];if(t.type==='単勝')return o[0]===n[0];if(t.type==='馬複'||t.type==='馬連'){const a=[o[0],o[1]].sort((x,y)=>x-y),b=n.slice(0,2).sort((x,y)=>x-y);return a[0]===b[0]&&a[1]===b[1]}if(t.type==='ワイド')return o.slice(0,3).includes(n[0])&&o.slice(0,3).includes(n[1]);if(t.type==='三連複'){const a=o.slice(0,3).sort((x,y)=>x-y),b=n.slice(0,3).sort((x,y)=>x-y);return a.every((v,i)=>v===b[i])}return false}
+function portfolioHitProbability(tickets,rows){if(!tickets?.length)return 0;const by={};rows.forEach(x=>by[x.h.number]=x.prob);const ns=rows.map(x=>x.h.number);let sum=0;for(const a of ns)for(const b of ns)if(b!==a)for(const c of ns)if(c!==a&&c!==b){const o=[a,b,c],p=orderProb(o,by);if(tickets.some(t=>ticketHitOrder(t,o)))sum+=p}return clamp(sum,0,1)}
+function ticketRecommendations(rows,comboOdds={},targetRoi=1.20){const ba=combinationAdvice(rows,comboOdds,targetRoi),single=rows.slice(0,4).map(x=>({type:'単勝',key:String(x.h.number),numbers:[x.h.number],prob:x.prob,odds:x.odds,ev:x.ev,need:targetRoi/Math.max(x.prob,1e-9)}));const score=x=>x.odds!=null?(x.ev??0):x.prob;return {single:single.sort((a,b)=>score(b)-score(a)).slice(0,2),wide:ba.wide.slice().sort((a,b)=>score(b)-score(a)).slice(0,3),quinella:ba.quinella.slice().sort((a,b)=>score(b)-score(a)).slice(0,3),trio:ba.trio.slice().sort((a,b)=>score(b)-score(a)).slice(0,2)}}
+function targetPlan(rows,comboOdds={},opts={}){
+ const budget=Math.max(100,Math.floor((Number(opts.budget)||1000)/100)*100),targetRoi=Number(opts.targetRoi)||1.20,targetHit=Number(opts.targetHit)||.70,maxTickets=Math.max(1,Math.min(5,Math.floor(budget/100)));
+ const rec=ticketRecommendations(rows,comboOdds,targetRoi),anchor=rows[0]?.h.number,top4=new Set(rows.slice(0,4).map(x=>x.h.number));
+ let pool=[...rec.single,...rec.wide,...rec.quinella,...rec.trio].filter(x=>x.odds!=null&&x.ev!=null&&x.ev>=targetRoi);
+ pool=pool.filter(x=>x.type==='単勝'||x.numbers.includes(anchor)||x.numbers.every(n=>top4.has(n))).sort((a,b)=>b.prob-a.prob||b.ev-a.ev);
+ const chosen=[],caps={'単勝':1,'ワイド':3,'馬複':2,'三連複':1},counts={};
+ while(chosen.length<maxTickets){let best=null,bestHit=portfolioHitProbability(chosen,rows),gain=0;for(const c of pool){if(chosen.includes(c)||(counts[c.type]||0)>=caps[c.type])continue;const hp=portfolioHitProbability([...chosen,c],rows),g=hp-bestHit;if(g>gain+1e-9||(Math.abs(g-gain)<1e-9&&best&&c.ev>best.ev)){best=c;gain=g;bestHit=hp}}if(!best)break;chosen.push(best);counts[best.type]=(counts[best.type]||0)+1;if(bestHit>=targetHit)break}
+ const hitProb=portfolioHitProbability(chosen,rows),roi=chosen.length?chosen.reduce((z,x)=>z+x.ev,0)/chosen.length:null,meets=chosen.length>0&&hitProb>=targetHit&&roi>=targetRoi;
+ const tickets=meets?chosen.map(x=>({...x,amount:100})):[];
+ return {tickets,bestEffort:chosen,recommendations:rec,budget,targetRoi,targetHit,hitProb,roi,meets,anchor,confidence:rows.reduce((z,x)=>z+(x.auto?.confidence||0),0)/Math.max(rows.length,1),stance:meets?'購入候補あり':'見送り'}
 }
+function realisticBets(rows,comboOdds={},opts={}){return targetPlan(rows,comboOdds,{budget:opts.budget,targetRoi:opts.targetRoi||1.20,targetHit:opts.targetHit||.70})}
 function ticketNumbers(t){if(Array.isArray(t?.numbers)&&t.numbers.length)return t.numbers.map(Number).filter(Number.isFinite);return String(t?.key??'').split(/[-－−–—]/).map(Number).filter(Number.isFinite)}
 function historyResult(x){const r=x?.result||{};return {first:Number(r.first??x?.winner)||null,second:Number(r.second)||null,third:Number(r.third)||null}}
-function historyTickets(x){const out=[];for(const t of x?.tickets||[])if(t?.type&&t?.key!=null)out.push({...t,numbers:ticketNumbers(t)});if(x?.pick!=null&&!out.some(t=>t.type==='単勝'))out.unshift({type:'単勝',key:String(x.pick),numbers:[Number(x.pick)],ev:x.ev??null});const seen=new Set();return out.filter(t=>{const k=t.type+'|'+t.key;if(seen.has(k))return false;seen.add(k);return true})}
-function ticketGrade(t,result){const nums=ticketNumbers(t),r=result||{};const first=Number(r.first)||null,second=Number(r.second)||null,third=Number(r.third)||null;if(t.type==='単勝'){if(!first||nums.length<1)return null;return nums[0]===first}if(t.type==='馬連'){if(!first||!second||nums.length<2)return null;const a=nums.slice(0,2).sort((x,y)=>x-y),b=[first,second].sort((x,y)=>x-y);return a[0]===b[0]&&a[1]===b[1]}if(t.type==='ワイド'){if(!first||!second||!third||nums.length<2)return null;const top=new Set([first,second,third]);return top.has(nums[0])&&top.has(nums[1])}if(t.type==='三連複'){if(!first||!second||!third||nums.length<3)return null;const a=nums.slice(0,3).sort((x,y)=>x-y),b=[first,second,third].sort((x,y)=>x-y);return a.every((v,i)=>v===b[i])}return null}
+function canonType(t){return t==='馬連'?'馬複':t}
+function historyTickets(x){const out=[];for(const t of x?.tickets||[])if(t?.type&&t?.key!=null)out.push({...t,type:canonType(t.type),numbers:ticketNumbers(t)});if(x?.pick!=null&&!out.some(t=>t.type==='単勝'))out.unshift({type:'単勝',key:String(x.pick),numbers:[Number(x.pick)],ev:x.ev??null});const seen=new Set();return out.filter(t=>{const k=t.type+'|'+t.key;if(seen.has(k))return false;seen.add(k);return true})}
+function ticketGrade(t,result){const nums=ticketNumbers(t),r=result||{};const first=Number(r.first)||null,second=Number(r.second)||null,third=Number(r.third)||null;if(t.type==='単勝'){if(!first||nums.length<1)return null;return nums[0]===first}if(t.type==='馬複'||t.type==='馬連'){if(!first||!second||nums.length<2)return null;const a=nums.slice(0,2).sort((x,y)=>x-y),b=[first,second].sort((x,y)=>x-y);return a[0]===b[0]&&a[1]===b[1]}if(t.type==='ワイド'){if(!first||!second||!third||nums.length<2)return null;const top=new Set([first,second,third]);return top.has(nums[0])&&top.has(nums[1])}if(t.type==='三連複'){if(!first||!second||!third||nums.length<3)return null;const a=nums.slice(0,3).sort((x,y)=>x-y),b=[first,second,third].sort((x,y)=>x-y);return a.every((v,i)=>v===b[i])}return null}
 function typeAccuracy(history,type){let hits=0,total=0,raceHits=0,raceTotal=0;for(const x of history||[]){const result=historyResult(x),ts=historyTickets(x).filter(t=>t.type===type);if(!ts.length)continue;let graded=0,hitAny=false;for(const t of ts){const g=ticketGrade(t,result);if(g==null)continue;graded++;total++;if(g){hits++;hitAny=true}}if(graded){raceTotal++;if(hitAny)raceHits++}}return {type,hits,total,rate:total?hits/total:null,raceHits,raceTotal,raceRate:raceTotal?raceHits/raceTotal:null}}
-function allTypeAccuracy(history){return ['単勝','馬連','ワイド','三連複'].map(type=>typeAccuracy(history,type))}
-function normalizeStoredTicket(t){if(!t)return null;if(t.type)return {...t,numbers:ticketNumbers(t)};if(t.t)return {type:t.t,key:String(t.k??''),numbers:Array.isArray(t.n)?t.n.map(Number):ticketNumbers({key:t.k}),ev:t.e==null?null:Number(t.e),prob:t.p==null?null:Number(t.p),odds:t.o==null?null:Number(t.o)};return null}
+function allTypeAccuracy(history){return ['単勝','馬複','ワイド','三連複'].map(type=>typeAccuracy(history,type))}
+function normalizeStoredTicket(t){if(!t)return null;if(t.type)return {...t,type:canonType(t.type),numbers:ticketNumbers(t)};if(t.t)return {type:canonType(t.t),key:String(t.k??''),numbers:Array.isArray(t.n)?t.n.map(Number):ticketNumbers({key:t.k}),ev:t.e==null?null:Number(t.e),prob:t.p==null?null:Number(t.p),odds:t.o==null?null:Number(t.o)};return null}
 function backtestTickets(x){const a=(x?.backtestTickets||[]).map(normalizeStoredTicket).filter(Boolean);return a.length?a:historyTickets(x)}
 function distanceBand(v){v=Number(v)||0;if(!v)return '不明';if(v<=1200)return '～1200m';if(v<=1600)return '1300～1600m';if(v<=2000)return '1700～2000m';if(v<=2400)return '2100～2400m';return '2500m～'}
 function evBand(v){v=Number(v);if(!Number.isFinite(v))return 'EV不明';if(v<1)return '～0.99';if(v<1.1)return '1.00～1.09';if(v<1.2)return '1.10～1.19';if(v<1.3)return '1.20～1.29';return '1.30～'}
 function raceMeta(x){return {market:x?.market||x?.type||'unknown',course:x?.course||'',surface:x?.surface||'',distance:Number(x?.distance)||0,distanceBand:distanceBand(x?.distance),going:x?.going||''}}
-function filtersMatch(x,t,f={}){const m=raceMeta(x);if(f.type&&f.type!=='all'&&t.type!==f.type)return false;if(f.market&&f.market!=='all'&&m.market!==f.market)return false;if(f.surface&&f.surface!=='all'&&m.surface!==f.surface)return false;if(f.distanceBand&&f.distanceBand!=='all'&&m.distanceBand!==f.distanceBand)return false;if(f.going&&f.going!=='all'&&m.going!==f.going)return false;if(f.course&&f.course!=='all'&&m.course!==f.course)return false;if(f.evBand&&f.evBand!=='all'&&evBand(t.ev)!==f.evBand)return false;if(f.minEv!=null&&(t.ev==null||Number(t.ev)<Number(f.minEv)))return false;return true}
+function filtersMatch(x,t,f={}){const m=raceMeta(x);if(f.type&&f.type!=='all'&&canonType(t.type)!==canonType(f.type))return false;if(f.market&&f.market!=='all'&&m.market!==f.market)return false;if(f.surface&&f.surface!=='all'&&m.surface!==f.surface)return false;if(f.distanceBand&&f.distanceBand!=='all'&&m.distanceBand!==f.distanceBand)return false;if(f.going&&f.going!=='all'&&m.going!==f.going)return false;if(f.course&&f.course!=='all'&&m.course!==f.course)return false;if(f.evBand&&f.evBand!=='all'&&evBand(t.ev)!==f.evBand)return false;if(f.minEv!=null&&(t.ev==null||Number(t.ev)<Number(f.minEv)))return false;return true}
 function backtestRows(history,filters={}){const out=[];for(const x of history||[]){const result=historyResult(x);for(const t0 of backtestTickets(x)){const t=normalizeStoredTicket(t0);if(!t||!filtersMatch(x,t,filters))continue;const grade=ticketGrade(t,result);if(grade==null)continue;const odds=Number(t.odds),roiEligible=Number.isFinite(odds)&&odds>=1;out.push({entry:x,ticket:t,hit:!!grade,odds:roiEligible?odds:null,stake:roiEligible?100:0,payout:roiEligible&&grade?100*odds:0,meta:raceMeta(x),evBand:evBand(t.ev)})}}return out}
 function summarizeBacktest(history,filters={}){const rows=backtestRows(history,filters),withOdds=rows.filter(x=>x.stake>0),hits=rows.filter(x=>x.hit).length,stake=withOdds.reduce((s,x)=>s+x.stake,0),payout=withOdds.reduce((s,x)=>s+x.payout,0);return {rows,total:rows.length,hits,rate:rows.length?hits/rows.length:null,withOdds:withOdds.length,stake,payout,roi:stake?payout/stake:null}}
 function groupBacktest(history,dimension,filters={}){const rows=backtestRows(history,filters),map=new Map();for(const r of rows){let key='';if(dimension==='type')key=r.ticket.type;else if(dimension==='market')key=r.meta.market==='central'?'中央':'地方';else if(dimension==='course')key=r.meta.course||'不明';else if(dimension==='surface')key=r.meta.surface||'不明';else if(dimension==='distanceBand')key=r.meta.distanceBand;else if(dimension==='going')key=r.meta.going||'不明';else if(dimension==='evBand')key=r.evBand;else key='全体';const z=map.get(key)||{key,total:0,hits:0,withOdds:0,stake:0,payout:0};z.total++;if(r.hit)z.hits++;if(r.stake){z.withOdds++;z.stake+=r.stake;z.payout+=r.payout}map.set(key,z)}return [...map.values()].map(z=>({...z,rate:z.total?z.hits/z.total:null,roi:z.stake?z.payout/z.stake:null})).sort((a,b)=>(b.roi??-1)-(a.roi??-1)||b.total-a.total)}
+function goalStats(history){let races=0,raceHits=0,stake=0,payout=0;for(const x of history||[]){const result=historyResult(x),ts=historyTickets(x);if(!ts.length||!result.first)continue;races++;let any=false;for(const t of ts){const g=ticketGrade(t,result);if(g==null)continue;if(g)any=true;const o=Number(t.odds);if(Number.isFinite(o)&&o>=1){stake+=100;if(g)payout+=100*o}}if(any)raceHits++}return {races,raceHits,hitRate:races?raceHits/races:null,stake,payout,roi:stake?payout/stake:null,targetHit:.70,targetRoi:1.20}}
 function walkForward(history,filters={}){const entries=(history||[]).filter(x=>historyResult(x).first!=null&&backtestTickets(x).some(t=>normalizeStoredTicket(t)?.odds!=null&&normalizeStoredTicket(t)?.ev!=null)).slice().sort((a,b)=>String(a.date||a.createdAt||a.id).localeCompare(String(b.date||b.createdAt||b.id)));if(entries.length<6)return {enough:false,races:entries.length};const cut=Math.max(3,Math.floor(entries.length*.7)),train=entries.slice(0,cut),test=entries.slice(cut),thresholds=[1.0,1.1,1.2,1.3],minTickets=Math.max(5,Math.floor(train.length*.6));const candidates=thresholds.map(th=>({threshold:th,...summarizeBacktest(train,{...filters,minEv:th})})).filter(x=>x.withOdds>=minTickets&&x.roi!=null);if(!candidates.length)return {enough:false,races:entries.length,reason:'tickets'};candidates.sort((a,b)=>b.roi-a.roi||b.threshold-a.threshold);const best=candidates[0],validation=summarizeBacktest(test,{...filters,minEv:best.threshold});return {enough:true,races:entries.length,trainRaces:train.length,testRaces:test.length,threshold:best.threshold,train:best,validation}}
 function parse(raw){const p=parsePayload(raw);return parseNAR(p)||parseJRA(p)}
-const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,autoFactors,rank,FEATURE_WEIGHTS,FEATURE_LABELS,overallScore,overallGrade,judgement,marginScoreOne,popularityScoreOne,racePerformance,trendScore,parseOddsText,parseOddsTables,parseNarPastCell,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
+const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,racePerformance,trendScore,parseOddsText,parseOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);

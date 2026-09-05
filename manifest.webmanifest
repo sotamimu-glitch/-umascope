@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.8.1",
+  "name": "UmaScope Free AutoBet 1.9",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "総合判定・見送り/購入候補表示・予想保存ボタンの表示不具合を修正した中央/地方競馬分析PWA"
+  "description": "6指数分析、地方競馬近走修正、4券種予想、目標回収率120%・レース的中率70%の選別モード"
 }
