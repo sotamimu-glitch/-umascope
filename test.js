@@ -248,3 +248,13 @@ console.log('Combination probability/odds: OK');
  if(h.recent[0].weight!==57)throw Error('v1.7 past weight '+JSON.stringify(h.recent[0]));
  console.log('v1.7 frame/weight parser: OK',h.frame,h.recent[0].weight);
 }
+
+
+// v1.8 overall score / grade regression
+{
+  const v={margin:9,popularity:8,field:8,distance:8,surface:8,going:8,jockey:8,frame:7,weight:7,trend:9};
+  const j=C.judgement(v);
+  if(j.score<80||j.grade!=='S')throw Error('v1.8 grade S failed '+JSON.stringify(j));
+  if(C.overallGrade(79)!=='A'||C.overallGrade(69)!=='B'||C.overallGrade(59)!=='C'||C.overallGrade(49)!=='D')throw Error('v1.8 thresholds failed');
+  console.log('v1.8 judgement: OK',j);
+}

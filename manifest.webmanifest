@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.7",
+  "name": "UmaScope Free AutoBet 1.8",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "10特徴量モデルと現実的な買い目自動生成を備えた中央・地方競馬分析PWA"
+  "description": "10特徴量の100点評価・S〜D総合判定と、大きな見送り表示を備えた中央・地方競馬分析PWA"
 }

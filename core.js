@@ -291,6 +291,18 @@ function goingSimilarity(a,b){
 }
 const FEATURE_WEIGHTS={margin:.16,popularity:.08,field:.08,distance:.12,surface:.10,going:.08,jockey:.10,frame:.05,weight:.07,trend:.16};
 const FEATURE_LABELS={margin:'着差',popularity:'人気',field:'頭数',distance:'距離変化',surface:'芝ダート',going:'馬場状態',jockey:'騎手',frame:'枠順',weight:'斤量',trend:'近走推移'};
+function overallScore(v){
+  const rating=Object.entries(FEATURE_WEIGHTS).reduce((sum,[k,w])=>sum+(Number(v?.[k])||5)*w,0);
+  return clamp(Math.round(rating*10),10,100)
+}
+function overallGrade(score){
+  const s=Number(score)||0;
+  return s>=80?'S':s>=70?'A':s>=60?'B':s>=50?'C':'D'
+}
+function judgement(v){
+  const score=overallScore(v);
+  return {score,grade:overallGrade(score)}
+}
 function autoFactors(h,r){
   const recent=(h.recent||[]).slice(0,20),latest=recent[0]||null,details={};
 
@@ -369,7 +381,8 @@ function rank(r,overrides={}){
   let rows=r.horses.map(h=>{
     const auto=autoFactors(h,r),v={...auto,...(overrides[h.number]||{})};
     const rating=Object.entries(FEATURE_WEIGHTS).reduce((sum,[k,w])=>sum+(Number(v[k])||5)*w,0);
-    return {h,auto,v,rating,odds:h.odds||null}
+    const j=judgement(v);
+    return {h,auto,v,rating,score:j.score,grade:j.grade,odds:h.odds||null}
   });
   const temp=1.55,ex=rows.map(x=>Math.exp(x.rating/temp)),sum=ex.reduce((a,b)=>a+b,0);
   const avgConf=rows.reduce((z,x)=>z+x.auto.confidence,0)/Math.max(1,rows.length),alpha=.28+.58*avgConf;
@@ -480,4 +493,4 @@ function summarizeBacktest(history,filters={}){const rows=backtestRows(history,f
 function groupBacktest(history,dimension,filters={}){const rows=backtestRows(history,filters),map=new Map();for(const r of rows){let key='';if(dimension==='type')key=r.ticket.type;else if(dimension==='market')key=r.meta.market==='central'?'中央':'地方';else if(dimension==='course')key=r.meta.course||'不明';else if(dimension==='surface')key=r.meta.surface||'不明';else if(dimension==='distanceBand')key=r.meta.distanceBand;else if(dimension==='going')key=r.meta.going||'不明';else if(dimension==='evBand')key=r.evBand;else key='全体';const z=map.get(key)||{key,total:0,hits:0,withOdds:0,stake:0,payout:0};z.total++;if(r.hit)z.hits++;if(r.stake){z.withOdds++;z.stake+=r.stake;z.payout+=r.payout}map.set(key,z)}return [...map.values()].map(z=>({...z,rate:z.total?z.hits/z.total:null,roi:z.stake?z.payout/z.stake:null})).sort((a,b)=>(b.roi??-1)-(a.roi??-1)||b.total-a.total)}
 function walkForward(history,filters={}){const entries=(history||[]).filter(x=>historyResult(x).first!=null&&backtestTickets(x).some(t=>normalizeStoredTicket(t)?.odds!=null&&normalizeStoredTicket(t)?.ev!=null)).slice().sort((a,b)=>String(a.date||a.createdAt||a.id).localeCompare(String(b.date||b.createdAt||b.id)));if(entries.length<6)return {enough:false,races:entries.length};const cut=Math.max(3,Math.floor(entries.length*.7)),train=entries.slice(0,cut),test=entries.slice(cut),thresholds=[1.0,1.1,1.2,1.3],minTickets=Math.max(5,Math.floor(train.length*.6));const candidates=thresholds.map(th=>({threshold:th,...summarizeBacktest(train,{...filters,minEv:th})})).filter(x=>x.withOdds>=minTickets&&x.roi!=null);if(!candidates.length)return {enough:false,races:entries.length,reason:'tickets'};candidates.sort((a,b)=>b.roi-a.roi||b.threshold-a.threshold);const best=candidates[0],validation=summarizeBacktest(test,{...filters,minEv:best.threshold});return {enough:true,races:entries.length,trainRaces:train.length,testRaces:test.length,threshold:best.threshold,train:best,validation}}
 function parse(raw){const p=parsePayload(raw);return parseNAR(p)||parseJRA(p)}
-const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,autoFactors,rank,FEATURE_WEIGHTS,FEATURE_LABELS,marginScoreOne,popularityScoreOne,racePerformance,trendScore,parseOddsText,parseOddsTables,parseNarPastCell,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
+const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,autoFactors,rank,FEATURE_WEIGHTS,FEATURE_LABELS,overallScore,overallGrade,judgement,marginScoreOne,popularityScoreOne,racePerformance,trendScore,parseOddsText,parseOddsTables,parseNarPastCell,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
