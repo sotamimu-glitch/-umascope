@@ -16,3 +16,31 @@ console.log('v1.9 tests: ALL OK');
  const pp={umascope:6,url:'https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/DebaTableSmall?k_babaCode=31&k_raceDate=2026%2F09%2F05&k_raceNo=1',text:'地方競馬情報サイト',narDetailText:`2026年9月5日（土） 高 知 第1競走 ダート 1300ｍ（右）15:25発走\nテスト競走\n1 1 サトノクラウン 牝 2\nナインスマイル\n（高知） 55.0\n新庄海\n（高知）\n全 0-0-0-3\n場 0-0-0-3\n距 0-0-0-3`,narDetailTables:[[['枠 番','馬 番','父 性齢 馬 名 母','負担重量 騎 手','前 走','前々走'],['1','1','サトノクラウン 牝 2\nナインスマイル\nナチュラリスト 鹿毛','55.0\n新庄海\n（高知）','高知08.02 良 右 1300\nアクイラ特別2歳-3\n10/11 11人 ☆阿部基 54.0\n4番 423 スミスバローズ\n1314（4.1） 11-11-11-10 42.6','高知07.19 不良 右 1300\nキグナス特別2歳-2\n10/11 9人 佐原秀 55.0\n4番 434 サンサンキック\n1276（2.1） 10-10-10-10 40.5']]]};
  const rr=C.parse(JSON.stringify(pp));ok(rr&&rr.horses[0].name==='ナインスマイル','NAR table horse name');ok(rr.horses[0].recent.length===2,'NAR table recent merge '+JSON.stringify(rr.horses[0]));console.log('NAR table-cell recent fallback: OK',rr.horses[0].name,rr.horses[0].recent.length)
 }
+
+
+// v1.10 AI suggested bets + comparison regression
+{
+ const h=[{
+   id:1,
+   aiTop3:[
+     {rank:1,number:3,name:'A',score:82,grade:'S'},
+     {rank:2,number:5,name:'B',score:75,grade:'A'},
+     {rank:3,number:1,name:'C',score:68,grade:'B'}
+   ],
+   horseNames:{'1':'C','3':'A','5':'B','7':'D'},
+   aiTickets:[
+     {type:'単勝',key:'3',numbers:[3],odds:3.0},
+     {type:'ワイド',key:'3-5',numbers:[3,5],odds:2.0},
+     {type:'馬複',key:'3-7',numbers:[3,7],odds:5.0},
+     {type:'三連複',key:'1-3-5',numbers:[1,3,5],odds:8.0}
+   ],
+   result:{first:3,second:7,third:5}
+ }];
+ const s=C.suggestedStats(h);
+ if(s.graded!==4||s.hits!==3)throw Error('v1.10 suggested stats '+JSON.stringify(s));
+ if(Math.abs(s.roi-2.5)>1e-9)throw Error('v1.10 roi '+s.roi);
+ if(Math.abs(s.raceRate-1)>1e-9)throw Error('v1.10 race rate');
+ const c=C.resultComparison(h[0]);
+ if(!c.top1||c.top3Hits!==2)throw Error('v1.10 comparison '+JSON.stringify(c));
+ console.log('v1.10 AI-vs-result/all-suggested: OK',s,c.top1,c.top3Hits);
+}

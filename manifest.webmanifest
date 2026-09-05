@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.9",
+  "name": "UmaScope Free AutoBet 1.10",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "6指数分析、地方競馬近走修正、4券種予想、目標回収率120%・レース的中率70%の選別モード"
+  "description": "AI予想と実結果の比較、購入判定に関係なく全提示買い目の100円均等買い的中率・回収率を表示する競馬分析PWA"
 }
