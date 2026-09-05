@@ -200,3 +200,51 @@ console.log('Combination probability/odds: OK');
  if(r.courseName!=='阪神'||r.raceNo!==7||r.date!=='2026-09-05')throw Error('v1.6 url fallback '+JSON.stringify(r));
  console.log('v1.6 JRA URL fallback: OK',r.courseName,r.raceNo,r.date);
 }
+
+
+// v1.7 ten-feature model and realistic bet regression
+{
+ const rr={type:'central',surface:'芝',distance:1600,going:'良',courseName:'東京',horses:[
+   {number:1,frame:2,name:'上昇馬',jockey:'A',weight:55,odds:4.0,recent:[
+     {finish:2,field:16,pop:5,margin:.2,jockey:'A',weight:55,distance:1600,surface:'芝',going:'良'},
+     {finish:3,field:16,pop:7,margin:.4,jockey:'A',weight:55,distance:1600,surface:'芝',going:'良'},
+     {finish:5,field:16,pop:8,margin:.8,jockey:'B',weight:56,distance:1800,surface:'芝',going:'稍重'},
+     {finish:8,field:16,pop:6,margin:1.4,jockey:'B',weight:56,distance:1800,surface:'芝',going:'稍重'}]},
+   {number:2,frame:7,name:'下降馬',jockey:'C',weight:57,odds:5.5,recent:[
+     {finish:8,field:16,pop:4,margin:1.6,jockey:'C',weight:56,distance:1600,surface:'芝',going:'良'},
+     {finish:6,field:16,pop:4,margin:1.0,jockey:'C',weight:56,distance:1600,surface:'芝',going:'良'},
+     {finish:3,field:16,pop:5,margin:.4,jockey:'C',weight:56,distance:1600,surface:'芝',going:'良'},
+     {finish:2,field:16,pop:5,margin:.2,jockey:'C',weight:56,distance:1600,surface:'芝',going:'良'}]},
+   {number:3,frame:4,name:'普通馬',jockey:'D',weight:56,odds:8.0,recent:[
+     {finish:4,field:16,pop:6,margin:.6,jockey:'D',weight:56,distance:1600,surface:'芝',going:'良'},
+     {finish:4,field:16,pop:6,margin:.6,jockey:'D',weight:56,distance:1600,surface:'芝',going:'良'},
+     {finish:4,field:16,pop:6,margin:.6,jockey:'D',weight:56,distance:1600,surface:'芝',going:'良'}]}
+ ],comboOdds:{quinella:{'1-2':5.5,'1-3':8.5},wide:{'1-2':2.2,'1-3':2.8},trio:{'1-2-3':12.0}}};
+ const a=C.autoFactors(rr.horses[0],rr),b=C.autoFactors(rr.horses[1],rr);
+ const keys=['margin','popularity','field','distance','surface','going','jockey','frame','weight','trend'];
+ for(const k of keys)if(!(k in a)||a[k]<1||a[k]>10)throw Error('v1.7 missing feature '+k);
+ if(!(a.trend>b.trend))throw Error('v1.7 trend direction '+a.trend+' '+b.trend);
+ const rows=C.rank(rr,{});
+ if(rows[0].h.number!==1)throw Error('v1.7 rank '+JSON.stringify(rows.map(x=>[x.h.number,x.rating])));
+ const plan=C.realisticBets(rows,rr.comboOdds,{budget:1000,threshold:1.02});
+ if(plan.tickets.length>5)throw Error('v1.7 too many tickets');
+ if(plan.tickets.some(x=>x.type==='三連複')&&plan.tickets.filter(x=>x.type==='三連複').length>1)throw Error('v1.7 trio cap');
+ if(plan.tickets.reduce((z,x)=>z+(x.amount||0),0)>1000)throw Error('v1.7 budget overflow');
+ if(plan.tickets.filter(x=>x.type==='三連複').some(x=>x.amount>200))throw Error('v1.7 trio stake too high');
+ console.log('v1.7 ten-feature/realistic-bet: OK',rows.map(x=>[x.h.number,x.rating.toFixed(2),x.prob.toFixed(3)]),plan.tickets.map(x=>[x.type,x.key,x.amount]));
+}
+// v1.7 parser stores current frame and previous carried weight
+{
+ const p={umascope:5,url:'https://www.jra.go.jp/JRADB/accessD.html',text:`JRA
+2026年9月5日（土曜） 2回札幌5日 発走時刻：12時40分 6レース
+3歳未勝利
+コース：2,000メートル（芝・右）`,
+ jraTables:[[
+ ['枠','馬番','馬名','性齢/斤量/騎手','前走'],
+ ['3','5','テストホース 高橋 義忠 (栗東)','牡3 57.0 kg 武 豊','2026年8月9日 札幌 未勝利 2着 14頭3番4番人気 武 豊 57.0 kg 2000芝 2:01.2 良 480 kg 勝馬(0.2)']
+ ]]};
+ const r=C.parse(JSON.stringify(p)),h=r.horses[0];
+ if(h.frame!==3)throw Error('v1.7 frame '+JSON.stringify(h));
+ if(h.recent[0].weight!==57)throw Error('v1.7 past weight '+JSON.stringify(h.recent[0]));
+ console.log('v1.7 frame/weight parser: OK',h.frame,h.recent[0].weight);
+}
