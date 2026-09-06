@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.11",
+  "name": "UmaScope Free AutoBet 1.12",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "券種別成績をAI提示買い目基準に統一し、単勝を維持しながらワイド・馬複・三連複を上位馬中心に再設計した競馬分析PWA"
+  "description": "1着・2着内・3着内を別推定し、6000回シミュレーション、確率校正、中央地方別の実績学習、券種別EV最適化を行う競馬分析PWA"
 }

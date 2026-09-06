@@ -100,3 +100,48 @@ console.log('v1.9 tests: ALL OK');
   if(rec.trio.length!==1||!['1-2-3','1-2-4','1-3-4'].includes(rec.trio[0].key))throw Error('v1.11 trio not top-rank centered '+JSON.stringify(rec.trio));
   console.log('v1.11 stable combo selection: OK', rec.wide.map(x=>x.key),rec.quinella.map(x=>x.key),rec.trio.map(x=>x.key));
 }
+
+
+// v1.12 simulation / probability / diagnostics regression
+{
+  const rr={type:'central',date:'2026-09-06',courseName:'中山',raceNo:10,name:'3歳以上1勝クラス',surface:'芝',distance:1600,going:'良',classLevel:4,horses:[
+    {number:1,frame:1,name:'A',jockey:'J1',weight:55,odds:3.0,recent:[
+      {date:'2026-08-20',course:'中山',finish:1,field:16,pop:2,margin:.2,jockey:'J1',weight:55,bodyWeight:480,distance:1600,surface:'芝',going:'良',corners:[2,2,2,1],classLevel:3},
+      {date:'2026-07-20',course:'東京',finish:2,field:16,pop:3,margin:.1,jockey:'J1',weight:55,bodyWeight:478,distance:1600,surface:'芝',going:'良',corners:[3,3,2,2],classLevel:3}]},
+    {number:2,frame:3,name:'B',jockey:'J2',weight:56,odds:4.5,recent:[
+      {date:'2026-08-18',course:'中山',finish:3,field:16,pop:4,margin:.4,jockey:'J2',weight:56,bodyWeight:500,distance:1600,surface:'芝',going:'良',corners:[5,5,4,3],classLevel:4},
+      {date:'2026-07-18',course:'東京',finish:4,field:18,pop:6,margin:.6,jockey:'J2',weight:56,bodyWeight:504,distance:1600,surface:'芝',going:'稍重',corners:[7,6,5,4],classLevel:4}]},
+    {number:3,frame:5,name:'C',jockey:'J3',weight:57,odds:7.0,recent:[
+      {date:'2026-08-17',course:'新潟',finish:5,field:18,pop:5,margin:.8,jockey:'J3',weight:57,bodyWeight:470,distance:1600,surface:'芝',going:'良',corners:[12,11,8,5],classLevel:4},
+      {date:'2026-07-10',course:'東京',finish:6,field:16,pop:8,margin:1.0,jockey:'J3',weight:57,bodyWeight:468,distance:1800,surface:'芝',going:'良',corners:[13,12,9,6],classLevel:4}]},
+    {number:4,frame:7,name:'D',jockey:'J4',weight:56,odds:12.0,recent:[
+      {date:'2026-08-16',course:'福島',finish:8,field:16,pop:10,margin:1.5,jockey:'J4',weight:56,bodyWeight:455,distance:1800,surface:'芝',going:'稍重',corners:[1,1,1,8],classLevel:4},
+      {date:'2026-07-02',course:'福島',finish:9,field:14,pop:9,margin:1.8,jockey:'J4',weight:56,bodyWeight:460,distance:1800,surface:'芝',going:'良',corners:[1,1,1,9],classLevel:4}]}
+  ],comboOdds:{quinella:{'1-2':6,'1-3':10,'1-4':18,'2-3':12,'2-4':22,'3-4':30},wide:{'1-2':2.2,'1-3':3.2,'1-4':5,'2-3':4,'2-4':6,'3-4':8},trio:{'1-2-3':14,'1-2-4':24,'1-3-4':35,'2-3-4':45}}};
+  const rows=C.rank(rr,{history:[]});
+  const sw=rows.reduce((s,x)=>s+x.pWin,0),s2=rows.reduce((s,x)=>s+x.pTop2,0),s3=rows.reduce((s,x)=>s+x.pTop3,0);
+  if(Math.abs(sw-1)>.01||Math.abs(s2-2)>.03||Math.abs(s3-3)>.03)throw Error('v1.12 marginal sums '+[sw,s2,s3]);
+  for(const x of rows)if(!(x.pWin<=x.pTop2+.03&&x.pTop2<=x.pTop3+.03))throw Error('v1.12 marginal order '+JSON.stringify(x));
+  const sim=rows.simulation;
+  const qsum=Object.values(sim.quinella).reduce((a,b)=>a+b,0),tsum=Object.values(sim.trio).reduce((a,b)=>a+b,0),wsum=Object.values(sim.wide).reduce((a,b)=>a+b,0);
+  if(Math.abs(qsum-1)>.05||Math.abs(tsum-1)>.05||Math.abs(wsum-3)>.20)throw Error('v1.12 combo sums '+[qsum,wsum,tsum]);
+  const rec=C.ticketRecommendations(rows,rr.comboOdds,C.learnTicketThresholds([],rr.type));
+  if(!rec.wide.length||!rec.quinella.length||!rec.trio.length)throw Error('v1.12 recommendations missing');
+  console.log('v1.12 simulation probabilities: OK',rows.map(x=>[x.h.number,x.pWin.toFixed(3),x.pTop2.toFixed(3),x.pTop3.toFixed(3)]));
+}
+{
+  const h=[
+    {aiTop3:[{number:1},{number:2},{number:3}],result:{first:1,second:4,third:2}},
+    {aiTop3:[{number:2},{number:3},{number:4}],result:{first:3,second:2,third:5}},
+    {aiTop3:[{number:4},{number:1},{number:2}],result:{first:3,second:5,third:6}}
+  ];
+  const d=C.rankingDiagnostics(h);
+  if(Math.abs(d.top1Win-1/3)>1e-9||Math.abs(d.top3Winner-2/3)>1e-9)throw Error('v1.12 diagnostics '+JSON.stringify(d));
+  console.log('v1.12 ranking diagnostics: OK',d);
+}
+{
+  if(C.classLevelFromText('G1 日本ダービー','central')!==10)throw Error('v1.12 class G1');
+  if(C.classLevelFromText('3歳以上1勝クラス','central')!==4)throw Error('v1.12 class 1win');
+  if(C.classLevelFromText('C3-7','local')==null)throw Error('v1.12 local class');
+  console.log('v1.12 class parser: OK');
+}
