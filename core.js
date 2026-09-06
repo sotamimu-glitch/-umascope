@@ -725,7 +725,7 @@ function ticketThresholdStats(entries,type,th){
   return {n,h,rate:n?h/n:null,roi:stake?payout/stake:null}
 }
 function learnTicketThresholds(history,market){
-  const entries=(history||[]).filter(x=>String(x.modelVersion||'').startsWith('1.12')&&historyResult(x).first!=null&&(market?((x.market||x.type)===market):true)).slice().sort((a,b)=>String(a.date||a.createdAt||a.id).localeCompare(String(b.date||b.createdAt||b.id)));
+  const entries=(history||[]).filter(x=>/^1\.(12|13)/.test(String(x.modelVersion||''))&&historyResult(x).first!=null&&(market?((x.market||x.type)===market):true)).slice().sort((a,b)=>String(a.date||a.createdAt||a.id).localeCompare(String(b.date||b.createdAt||b.id)));
   const out={};for(const [type,def] of Object.entries(DEFAULT_TICKET_THRESHOLDS_112))out[type]={threshold:def,learned:false,races:entries.length};
   if(entries.length<25)return out;
   const cut=Math.max(18,Math.floor(entries.length*.7)),train=entries.slice(0,cut),test=entries.slice(cut),grid=[1.05,1.10,1.15,1.20,1.25,1.30,1.40,1.50,1.70];
@@ -787,9 +787,238 @@ function calibrationStatus(history,market){
   return {win:calibrationSamples(history,market,'pWin').length,top2:calibrationSamples(history,market,'pTop2').length,top3:calibrationSamples(history,market,'pTop3').length}
 }
 function currentModelHistory(history,prefix='1.12'){return (history||[]).filter(x=>String(x?.modelVersion||'').startsWith(prefix))}
+
+// ============================================================
+// v1.13 — separate win / top2 / top3 models + ticket-specific ranks
+// ============================================================
+const ROLE_BASE_WEIGHTS_113={
+  win:{ability:.38,suitability:.17,pace:.18,jockey:.08,form:.19},
+  top2:{ability:.31,suitability:.23,pace:.15,jockey:.09,form:.22},
+  top3:{ability:.24,suitability:.29,pace:.18,jockey:.08,form:.21}
+};
+function roleTargetSet(result,role){
+  if(role==='win')return new Set([Number(result.first)].filter(Boolean));
+  if(role==='top2')return new Set([Number(result.first),Number(result.second)].filter(Boolean));
+  return new Set([Number(result.first),Number(result.second),Number(result.third)].filter(Boolean))
+}
+function roleForecastEntries(history,market){
+  return (history||[]).filter(x=>{
+    const r=historyResult(x);
+    return r.first!=null&&Array.isArray(x.aiForecast)&&x.aiForecast.length>=3&&(market?((x.market||x.type)===market):true)
+  }).slice().sort((a,b)=>String(a.date||a.createdAt||a.id).localeCompare(String(b.date||b.createdAt||b.id)))
+}
+function roleWeightsBase(role){return normalizeWeights(ROLE_BASE_WEIGHTS_113[role]||ROLE_BASE_WEIGHTS_113.win)}
+function learnRoleWeights(entries,role){
+  const keys=['ability','suitability','pace','jockey','form'],lifts=Object.fromEntries(keys.map(k=>[k,[]]));
+  for(const x of entries||[]){
+    const f=x.aiForecast||[],targets=roleTargetSet(historyResult(x),role);if(!targets.size||f.length<3)continue;
+    for(const k of keys){
+      const vals=f.map(z=>Number(z.indices?.[k])).filter(Number.isFinite);if(vals.length<3)continue;
+      const mean=vals.reduce((a,b)=>a+b,0)/vals.length,sd=Math.sqrt(vals.reduce((s,v)=>s+(v-mean)**2,0)/vals.length)||1;
+      const pos=f.filter(z=>targets.has(Number(z.number))&&Number.isFinite(Number(z.indices?.[k]))).map(z=>(Number(z.indices[k])-mean)/sd);
+      if(pos.length)lifts[k].push(pos.reduce((a,b)=>a+b,0)/pos.length)
+    }
+  }
+  const base=roleWeightsBase(role),raw={};
+  for(const k of keys){
+    const a=lifts[k],lift=a.length?a.reduce((s,v)=>s+v,0)/a.length:0;
+    raw[k]=base[k]*Math.exp(clamp(lift,-1.2,1.2)*.34)
+  }
+  return normalizeWeights(raw)
+}
+function scoreForecastRole(z,w){return Object.entries(normalizeWeights(w)).reduce((s,[k,v])=>s+(Number(z.indices?.[k])||50)*v,0)}
+function evaluateRole(entries,w,role){
+  let n=0,hit=0,totalCredit=0;
+  for(const x of entries||[]){
+    const f=(x.aiForecast||[]).slice().sort((a,b)=>scoreForecastRole(b,w)-scoreForecastRole(a,w)),r=historyResult(x),targets=roleTargetSet(r,role);
+    if(!targets.size||f.length<3)continue;
+    if(role==='win'){
+      n++;if(targets.has(Number(f[0]?.number)))hit++
+    }else{
+      const k=role==='top2'?2:3,selected=new Set(f.slice(0,k).map(z=>Number(z.number)));
+      let c=0;for(const no of targets)if(selected.has(no))c++;
+      n++;totalCredit+=c/Math.max(1,targets.size);if(c===targets.size)hit++
+    }
+  }
+  return {n,h:hit,rate:n?hit/n:null,credit:n?totalCredit/n:null}
+}
+function roleWeightWalkForward(history,market,role){
+  const e=roleForecastEntries(history,market),base=roleWeightsBase(role);
+  if(e.length<30)return {enough:false,races:e.length,weights:base,role};
+  const cut=Math.max(20,Math.floor(e.length*.7)),train=e.slice(0,cut),test=e.slice(cut),learned=learnRoleWeights(train,role),
+        baseEval=evaluateRole(test,base,role),learnEval=evaluateRole(test,learned,role);
+  const baseMetric=role==='win'?baseEval.rate:baseEval.credit,learnMetric=role==='win'?learnEval.rate:learnEval.credit;
+  const usable=learnEval.n>=8&&learnMetric!=null&&baseMetric!=null&&learnMetric>=baseMetric-.005;
+  const blend=usable?clamp((e.length-30)/120,0,.50):0,weights={};
+  for(const k of Object.keys(base))weights[k]=base[k]*(1-blend)+learned[k]*blend;
+  return {enough:true,races:e.length,train:train.length,test:test.length,learned,baseEval,learnEval,usable,blend,weights:normalizeWeights(weights),role}
+}
+function finishConsistency(h){
+  const vals=(h.recent||[]).slice(0,6).map(x=>finishScore(x)).filter(Number.isFinite);
+  if(vals.length<2)return {score:50,samples:vals.length};
+  const mean=vals.reduce((a,b)=>a+b,0)/vals.length,sd=Math.sqrt(vals.reduce((s,v)=>s+(v-mean)**2,0)/vals.length);
+  return {score:clamp(Math.round(50+(mean-5)*5-sd*4),25,78),samples:vals.length}
+}
+function roleScoreForRow(x,role,w,r,relative){
+  const abs=Object.entries(normalizeWeights(w)).reduce((s,[k,v])=>s+(Number(x.indices?.[k])||50)*v,0);
+  const rel=Object.entries(normalizeWeights(w)).reduce((s,[k,v])=>s+(Number(relative?.[x.h.number]?.[k])||50)*v,0);
+  let score=.55*abs+.45*rel;
+  const st=styleProfile(x.h),cons=finishConsistency(x.h);
+  if(role==='win'){
+    score+=(Number(x.indices.ability)-50)*.035+(Number(x.indices.form)-50)*.025;
+    if(st.gain!=null&&st.gain>.10)score+=Math.min(3,st.gain*12)
+  }else if(role==='top2'){
+    score+=(cons.score-50)*.055+(Number(x.indices.suitability)-50)*.018
+  }else{
+    score+=(cons.score-50)*.085+(Number(x.indices.suitability)-50)*.030;
+    if(st.early!=null&&st.early<=.42)score+=1.2
+  }
+  return score
+}
+function roleSoftmax(rows,roleScores,targetSum,temp=8.5){
+  const vals=rows.map(x=>roleScores[x.h.number]),mx=Math.max(...vals),raw=vals.map(v=>Math.exp((v-mx)/temp)),sum=raw.reduce((a,b)=>a+b,0)||1;
+  return rescaleProbabilities(raw.map(v=>v/sum),Math.min(targetSum,rows.length))
+}
+function rescaleWithFloor(vals,target,floors){
+  let a=vals.map((v,i)=>clamp(Math.max(Number(v)||0,Number(floors?.[i])||0),0,1)),sum=a.reduce((s,v)=>s+v,0);
+  if(sum<target){
+    for(let z=0;z<6&&sum<target-.000001;z++){
+      const room=a.map(v=>1-v),rs=room.reduce((s,v)=>s+v,0);if(!rs)break;
+      const add=target-sum;a=a.map((v,i)=>clamp(v+add*room[i]/rs,0,1));sum=a.reduce((s,v)=>s+v,0)
+    }
+  }else if(sum>target){
+    for(let z=0;z<6&&sum>target+.000001;z++){
+      const room=a.map((v,i)=>Math.max(0,v-(Number(floors?.[i])||0))),rs=room.reduce((s,v)=>s+v,0);if(!rs)break;
+      const sub=sum-target;a=a.map((v,i)=>Math.max(Number(floors?.[i])||0,v-sub*room[i]/rs));sum=a.reduce((s,v)=>s+v,0)
+    }
+  }
+  return a
+}
+function enforceMarginals(p1,p2,p3,n){
+  p1=rescaleProbabilities(p1,Math.min(1,n));
+  p2=rescaleWithFloor(p2,Math.min(2,n),p1);
+  p3=rescaleWithFloor(p3,Math.min(3,n),p2);
+  return {p1,p2,p3}
+}
+function simulateRaceRole(rows,n=SIMULATIONS_112,seed=1){
+  const nums=rows.map(x=>x.h.number),ww={},w2={},w3={};
+  for(const x of rows){
+    ww[x.h.number]=Math.max(1e-7,Number(x.roleBaseWin)||1/rows.length);
+    w2[x.h.number]=Math.max(1e-7,Number(x.roleBaseTop2)||2/rows.length);
+    w3[x.h.number]=Math.max(1e-7,Number(x.roleBaseTop3)||3/rows.length)
+  }
+  const win={},top2={},top3={},q={},w={},t={},orders={};for(const no of nums){win[no]=0;top2[no]=0;top3[no]=0}
+  const rand=rng32(seed);
+  for(let z=0;z<n;z++){
+    const left=nums.slice(),o=[],picks=Math.min(3,left.length);
+    if(picks>=1){const no=weightedPick(left,ww,rand);o.push(no);left.splice(left.indexOf(no),1)}
+    if(picks>=2){const no=weightedPick(left,w2,rand);o.push(no);left.splice(left.indexOf(no),1)}
+    if(picks>=3){const no=weightedPick(left,w3,rand);o.push(no);left.splice(left.indexOf(no),1)}
+    if(!o.length)continue;
+    win[o[0]]++;for(let i=0;i<Math.min(2,o.length);i++)top2[o[i]]++;for(let i=0;i<Math.min(3,o.length);i++)top3[o[i]]++;
+    if(o.length>=2){const k=comboKey([o[0],o[1]]);q[k]=(q[k]||0)+1}
+    if(o.length>=3){
+      for(const pair of [[o[0],o[1]],[o[0],o[2]],[o[1],o[2]]]){const k=comboKey(pair);w[k]=(w[k]||0)+1}
+      const tk=comboKey(o);t[tk]=(t[tk]||0)+1;orders[o.join('-')]=(orders[o.join('-')]||0)+1
+    }
+  }
+  const div=obj=>Object.fromEntries(Object.entries(obj).map(([k,v])=>[k,v/n]));
+  return {n,win:div(win),top2:div(top2),top3:div(top3),quinella:div(q),wide:div(w),trio:div(t),orders:div(orders)}
+}
+function rank(r,opts={}){
+  const history=opts.history||[],market=r.type||'central';
+  const rwWin=roleWeightWalkForward(history,market,'win'),rw2=roleWeightWalkForward(history,market,'top2'),rw3=roleWeightWalkForward(history,market,'top3');
+  let rows=r.horses.map(h=>{const indices=sixIndices(h,r),score=modelScore(indices,BASE_MODEL_WEIGHTS_112);return {h,auto:indices,indices,score,grade:overallGrade(score),odds:h.odds||null}});
+  const relWin=relativeIndexScores(rows,rwWin.weights),rel2=relativeIndexScores(rows,rw2.weights),rel3=relativeIndexScores(rows,rw3.weights);
+  const sWin={},s2={},s3={};
+  for(const x of rows){sWin[x.h.number]=roleScoreForRow(x,'win',rwWin.weights,r,relWin);s2[x.h.number]=roleScoreForRow(x,'top2',rw2.weights,r,rel2);s3[x.h.number]=roleScoreForRow(x,'top3',rw3.weights,r,rel3)}
+  let b1=roleSoftmax(rows,sWin,1,7.8),b2=roleSoftmax(rows,s2,2,9.2),b3=roleSoftmax(rows,s3,3,10.2);
+  rows.forEach((x,i)=>{x.roleBaseWin=b1[i];x.roleBaseTop2=b2[i];x.roleBaseTop3=b3[i];x.roleScores={win:sWin[x.h.number],top2:s2[x.h.number],top3:s3[x.h.number]}});
+
+  const seed=hashSeed([r.date,r.courseName,r.raceNo,r.name,'v113'].join('|')),sim=simulateRaceRole(rows,SIMULATIONS_112,seed);
+  const cal1=calibrationSamples(history,market,'pWin'),cal2=calibrationSamples(history,market,'pTop2'),cal3=calibrationSamples(history,market,'pTop3');
+  let p1=rows.map(x=>sim.win[x.h.number]||0).map(p=>calibrateOne(p,cal1)),
+      p2=rows.map(x=>sim.top2[x.h.number]||0).map(p=>calibrateOne(p,cal2)),
+      p3=rows.map(x=>sim.top3[x.h.number]||0).map(p=>calibrateOne(p,cal3));
+  ({p1,p2,p3}=enforceMarginals(p1,p2,p3,rows.length));
+
+  rows=rows.map((x,i)=>{const ev=x.odds?p1[i]*x.odds:null;return {...x,prob:p1[i],pWin:p1[i],pTop2:p2[i],pTop3:p3[i],ev,indices:{...x.indices,value:valueIndex(ev)}}});
+  const winOrder=rows.slice().sort((a,b)=>b.pWin-a.pWin),twoOrder=rows.slice().sort((a,b)=>b.pTop2-a.pTop2),threeOrder=rows.slice().sort((a,b)=>b.pTop3-a.pTop3);
+  const wr=new Map(winOrder.map((x,i)=>[x.h.number,i+1])),r2=new Map(twoOrder.map((x,i)=>[x.h.number,i+1])),r3=new Map(threeOrder.map((x,i)=>[x.h.number,i+1]));
+  rows=rows.map(x=>({...x,roleRanks:{win:wr.get(x.h.number),top2:r2.get(x.h.number),top3:r3.get(x.h.number)}}));
+
+  const adjMap=(obj,target,rawTarget,size)=>{const out={};for(const [k,p] of Object.entries(obj)){const ns=k.split('-').map(Number);let f=1;for(const no of ns){const i=rows.findIndex(x=>x.h.number===no),den=Math.max(1e-6,rawTarget[no]||0),num=Math.max(1e-6,target[i]||0);f*=num/den}out[k]=clamp(p*Math.pow(f,1/size),0,1)}return out};
+  sim.quinella=adjMap(sim.quinella,p2,sim.top2,2);sim.wide=adjMap(sim.wide,p3,sim.top3,2);sim.trio=adjMap(sim.trio,p3,sim.top3,3);
+
+  rows.simulation=sim;
+  rows.roleOrders={win:winOrder.map(x=>x.h.number),top2:twoOrder.map(x=>x.h.number),top3:threeOrder.map(x=>x.h.number)};
+  rows.modelMeta={simulations:SIMULATIONS_112,market,roleWeights:{win:rwWin.weights,top2:rw2.weights,top3:rw3.weights},roleWalkForward:{win:rwWin,top2:rw2,top3:rw3},calibrationSamples:{win:cal1.length,top2:cal2.length,top3:cal3.length}};
+  return rows.sort((a,b)=>a.roleRanks.win-b.roleRanks.win)
+}
+function ticketRecommendations(rows,comboOdds={},thresholds=DEFAULT_TICKET_THRESHOLDS_112){
+  if(typeof thresholds==='number')thresholds={'単勝':thresholds,'ワイド':thresholds,'馬複':thresholds,'三連複':thresholds};
+  const ba=combinationAdvice(rows,comboOdds,1.20),byKey=arr=>new Map(arr.map(x=>[x.key,x]));
+  const fallbackRank=x=>Math.max(1,rows.indexOf(x)+1),rv=(x,k)=>Number(x?.roleRanks?.[k])||fallbackRank(x);
+  const win=rows.slice().sort((a,b)=>rv(a,'win')-rv(b,'win')),
+        top2=rows.slice().sort((a,b)=>rv(a,'top2')-rv(b,'top2')),
+        top3=rows.slice().sort((a,b)=>rv(a,'top3')-rv(b,'top3'));
+  const single=win.slice(0,4).map(x=>({type:'単勝',key:String(x.h.number),numbers:[x.h.number],prob:Number(x.pWin??x.prob)||0,odds:x.odds,ev:x.ev,need:(thresholds['単勝']||1.12)/Math.max(Number(x.pWin??x.prob)||0,1e-9)}))
+    .sort((a,b)=>(b.prob*Math.pow(Math.max(.8,b.ev??1),.22))-(a.prob*Math.pow(Math.max(.8,a.ev??1),.22))).slice(0,2);
+
+  const wideMap=byKey(ba.wide),qMap=byKey(ba.quinella),tMap=byKey(ba.trio),key2=(a,b)=>comboKey([a,b]),key3=(a,b,c)=>comboKey([a,b,c]);
+  const t3=top3.slice(0,6).map(x=>x.h.number),t2=top2.slice(0,5).map(x=>x.h.number),tw=win.slice(0,3).map(x=>x.h.number);
+  const wideKeys=[];for(let i=0;i<t3.length;i++)for(let j=i+1;j<t3.length;j++)if(i<3||j<3)wideKeys.push(key2(t3[i],t3[j]));
+  const qKeys=[];for(const a of tw)for(const b of t2)if(a!==b)qKeys.push(key2(a,b));
+  const trioKeys=[];for(let i=0;i<t3.length;i++)for(let j=i+1;j<t3.length;j++)for(let k=j+1;k<t3.length;k++){const ns=[t3[i],t3[j],t3[k]],topFour=ns.filter(n=>t3.slice(0,4).includes(n)).length;if(topFour>=2)trioKeys.push(key3(...ns))}
+  const stable=x=>Math.max(x?.prob||0,1e-9)*Math.pow(clamp(x?.ev??1,.75,2),.18);
+  const uniqBest=(keys,map,n)=>[...new Set(keys)].map(k=>map.get(k)).filter(Boolean).sort((a,b)=>stable(b)-stable(a)).slice(0,n);
+  return {single,wide:uniqBest(wideKeys,wideMap,3),quinella:uniqBest(qKeys,qMap,2),trio:uniqBest(trioKeys,tMap,1)}
+}
+function targetPlan(rows,comboOdds={},opts={}){
+  const budget=Math.max(100,Math.floor((Number(opts.budget)||1000)/100)*100),targetRoi=Number(opts.targetRoi)||1.20,targetHit=Number(opts.targetHit)||.70,maxTickets=Math.max(1,Math.min(5,Math.floor(budget/100))),market=opts.market||rows.modelMeta?.market||'central',history=opts.history||[];
+  const learned=learnTicketThresholds(history,market),thresholds=Object.fromEntries(Object.entries(learned).map(([k,v])=>[k,v.threshold])),rec=ticketRecommendations(rows,comboOdds,thresholds);
+  const minProb={'単勝':.07,'ワイド':.18,'馬複':.06,'三連複':.025};
+  let pool=[...rec.single,...rec.wide,...rec.quinella,...rec.trio].filter(x=>x.odds!=null&&x.ev!=null&&x.ev>=(thresholds[canonType(x.type)]||1.2)&&x.prob>=(minProb[canonType(x.type)]||0)).sort((a,b)=>b.prob-a.prob||b.ev-a.ev);
+  const chosen=[],caps={'単勝':1,'ワイド':2,'馬複':2,'三連複':1},counts={};
+  while(chosen.length<maxTickets){
+    let best=null,bestHit=portfolioHitProbability(chosen,rows),gain=0;
+    for(const c of pool){
+      const typ=canonType(c.type);if(chosen.includes(c)||(counts[typ]||0)>=caps[typ])continue;
+      const hp=portfolioHitProbability([...chosen,c],rows),g=hp-bestHit,score=g*.82+(Math.max(0,c.ev-1))*.018;
+      if(score>gain+1e-9){best=c;gain=score;bestHit=hp}
+    }
+    if(!best)break;chosen.push(best);counts[canonType(best.type)]=(counts[canonType(best.type)]||0)+1;if(bestHit>=targetHit)break
+  }
+  const hitProb=portfolioHitProbability(chosen,rows),roi=chosen.length?chosen.reduce((z,x)=>z+x.ev,0)/chosen.length:null,meets=chosen.length>0&&hitProb>=targetHit&&roi>=targetRoi;
+  const tickets=meets?chosen.map(x=>({...x,amount:100})):[];
+  return {tickets,bestEffort:chosen,recommendations:rec,budget,targetRoi,targetHit,hitProb,roi,meets,anchor:rows.roleOrders?.win?.[0]??rows[0]?.h.number,confidence:rows.reduce((z,x)=>z+(x.auto?.confidence||0),0)/Math.max(rows.length,1),stance:meets?'購入候補あり':'見送り',thresholds,thresholdLearning:learned}
+}
+function rankingDiagnostics(history,prefix=null){
+  const src=prefix?(history||[]).filter(x=>String(x.modelVersion||'').startsWith(prefix)):(history||[]);
+  let n1=0,h1=0,n2=0,h2=0,n3=0,h3=0,nTwo=0,hTwo=0,nAll=0,hAll=0,nQ=0,hQ=0;
+  for(const x of src){
+    const r=historyResult(x),top=aiTop3(x);if(!r.first||!top.length)continue;
+    n1++;if(top[0]&&Number(top[0].number)===r.first)h1++;
+    if(top.length>=2){n2++;if(top.slice(0,2).some(z=>Number(z.number)===r.first))h2++;if(r.second){nQ++;const a=top.slice(0,2).map(z=>Number(z.number)).sort((a,b)=>a-b),b=[r.first,r.second].sort((a,b)=>a-b);if(a[0]===b[0]&&a[1]===b[1])hQ++}}
+    if(top.length>=3){n3++;if(top.slice(0,3).some(z=>Number(z.number)===r.first))h3++;if(r.second&&r.third){const ai=new Set(top.slice(0,3).map(z=>Number(z.number))),act=new Set([r.first,r.second,r.third]);let c=0;for(const no of ai)if(act.has(no))c++;nTwo++;if(c>=2)hTwo++;nAll++;if(c===3)hAll++}}
+  }
+  const q=(h,n)=>n?h/n:null;return {top1Win:q(h1,n1),top2Winner:q(h2,n2),top3Winner:q(h3,n3),top3AtLeast2:q(hTwo,nTwo),top3All:q(hAll,nAll),top2Quinella:q(hQ,nQ),counts:{n1,n2,n3,nTwo,nAll,nQ}}
+}
+function roleRankingDiagnostics(history,prefix='1.13'){
+  const src=(history||[]).filter(x=>!prefix||String(x.modelVersion||'').startsWith(prefix));
+  let n=0,w1=0,n2=0,both2=0,n3=0,two3=0,all3=0;
+  for(const x of src){
+    const r=historyResult(x),rt=x.aiRoleTop;if(!r.first||!rt)continue;
+    if(rt.win?.length){n++;if(Number(rt.win[0])===Number(r.first))w1++}
+    if(r.second&&rt.top2?.length>=2){n2++;const s=new Set(rt.top2.slice(0,2).map(Number));if(s.has(Number(r.first))&&s.has(Number(r.second)))both2++}
+    if(r.second&&r.third&&rt.top3?.length>=3){n3++;const s=new Set(rt.top3.slice(0,3).map(Number)),a=[r.first,r.second,r.third].map(Number);const c=a.filter(no=>s.has(no)).length;if(c>=2)two3++;if(c===3)all3++}
+  }
+  const q=(h,z)=>z?h/z:null;return {winTop1:q(w1,n),top2Exact:q(both2,n2),top3AtLeast2:q(two3,n3),top3All:q(all3,n3),counts:{n,n2,n3}}
+}
+function currentModelHistory(history,prefix='1.13'){return (history||[]).filter(x=>String(x?.modelVersion||'').startsWith(prefix))}
 function parse(raw){
   const p=parsePayload(raw),r=parseNAR(p)||parseJRA(p);
   if(r)r.classLevel=classLevelFromText([r.name,p.title,p.text,p.jraText,p.narDetailText].filter(Boolean).join(' '),r.type);
   return r
 }
-const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,weightWalkForward,calibrationStatus,learnTicketThresholds,rankingDiagnostics,parseOddsText,parseOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
+const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,weightWalkForward,roleWeightWalkForward,calibrationStatus,learnTicketThresholds,rankingDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);

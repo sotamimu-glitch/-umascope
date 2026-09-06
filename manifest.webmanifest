@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.12",
+  "name": "UmaScope Free AutoBet 1.13",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "1着・2着内・3着内を別推定し、6000回シミュレーション、確率校正、中央地方別の実績学習、券種別EV最適化を行う競馬分析PWA"
+  "description": "1着・2着内・3着内の役割別モデル、券種別ランキング、役割別6000回シミュレーション、世代別精度診断を備えた競馬分析PWA"
 }

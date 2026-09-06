@@ -145,3 +145,37 @@ console.log('v1.9 tests: ALL OK');
   if(C.classLevelFromText('C3-7','local')==null)throw Error('v1.12 local class');
   console.log('v1.12 class parser: OK');
 }
+
+
+// v1.13 role-specific models regression
+{
+  const rr={type:'central',date:'2026-09-07',courseName:'中山',raceNo:8,name:'3歳以上1勝クラス',surface:'芝',distance:1600,going:'良',classLevel:4,horses:[
+    {number:1,frame:1,name:'勝ち切り型',jockey:'J1',weight:55,odds:3.1,recent:[{date:'2026-08-25',course:'中山',finish:1,field:16,pop:2,margin:.5,jockey:'J1',weight:55,bodyWeight:480,distance:1600,surface:'芝',going:'良',corners:[7,6,3,1],classLevel:3},{date:'2026-07-20',course:'東京',finish:4,field:16,pop:3,margin:.4,jockey:'J1',weight:55,bodyWeight:478,distance:1600,surface:'芝',going:'良',corners:[10,8,6,4],classLevel:3}]},
+    {number:2,frame:2,name:'安定先行型',jockey:'J2',weight:56,odds:4.2,recent:[{date:'2026-08-24',course:'中山',finish:2,field:16,pop:4,margin:.2,jockey:'J2',weight:56,bodyWeight:500,distance:1600,surface:'芝',going:'良',corners:[2,2,2,2],classLevel:4},{date:'2026-07-18',course:'中山',finish:3,field:15,pop:4,margin:.3,jockey:'J2',weight:56,bodyWeight:502,distance:1600,surface:'芝',going:'良',corners:[3,3,3,3],classLevel:4},{date:'2026-06-20',course:'東京',finish:3,field:16,pop:5,margin:.4,jockey:'J2',weight:56,bodyWeight:500,distance:1600,surface:'芝',going:'稍重',corners:[3,3,3,3],classLevel:4}]},
+    {number:3,frame:4,name:'複勝圏型',jockey:'J3',weight:55,odds:6.5,recent:[{date:'2026-08-23',course:'中山',finish:3,field:16,pop:7,margin:.4,jockey:'J3',weight:55,bodyWeight:470,distance:1600,surface:'芝',going:'良',corners:[4,4,4,3],classLevel:4},{date:'2026-07-17',course:'中山',finish:3,field:16,pop:8,margin:.5,jockey:'J3',weight:55,bodyWeight:472,distance:1600,surface:'芝',going:'良',corners:[5,5,4,3],classLevel:4},{date:'2026-06-18',course:'東京',finish:4,field:18,pop:9,margin:.6,jockey:'J3',weight:55,bodyWeight:470,distance:1600,surface:'芝',going:'良',corners:[5,5,4,4],classLevel:4}]},
+    {number:4,frame:6,name:'ムラ型',jockey:'J4',weight:57,odds:10,recent:[{date:'2026-08-22',course:'新潟',finish:2,field:18,pop:5,margin:.1,jockey:'J4',weight:57,bodyWeight:460,distance:1600,surface:'芝',going:'良',corners:[13,10,5,2],classLevel:4},{date:'2026-07-15',course:'東京',finish:12,field:16,pop:5,margin:2.1,jockey:'J4',weight:57,bodyWeight:458,distance:1600,surface:'芝',going:'良',corners:[12,12,12,12],classLevel:4}]}
+  ],comboOdds:{quinella:{'1-2':6,'1-3':9,'1-4':15,'2-3':8,'2-4':14,'3-4':17},wide:{'1-2':2.2,'1-3':2.8,'1-4':4.2,'2-3':2.4,'2-4':3.8,'3-4':4.0},trio:{'1-2-3':11,'1-2-4':18,'1-3-4':22,'2-3-4':20}}};
+  const rows=C.rank(rr,{history:[]});
+  const s1=rows.reduce((s,x)=>s+x.pWin,0),s2=rows.reduce((s,x)=>s+x.pTop2,0),s3=rows.reduce((s,x)=>s+x.pTop3,0);
+  if(Math.abs(s1-1)>.02||Math.abs(s2-2)>.03||Math.abs(s3-3)>.04)throw Error('v1.13 probability sums '+[s1,s2,s3]);
+  for(const x of rows){if(!x.roleRanks||x.pWin>x.pTop2+.01||x.pTop2>x.pTop3+.01)throw Error('v1.13 roles/monotonic '+JSON.stringify(x))}
+  const rec=C.ticketRecommendations(rows,rr.comboOdds,C.learnTicketThresholds([],rr.type));
+  if(!rec.single.length||!rec.wide.length||!rec.quinella.length||!rec.trio.length)throw Error('v1.13 recommendations missing');
+  console.log('v1.13 role models: OK',rows.map(x=>[x.h.number,x.roleRanks,x.pWin.toFixed(3),x.pTop2.toFixed(3),x.pTop3.toFixed(3)]));
+}
+{
+  const h=[
+    {modelVersion:'1.13-role-models',aiTop3:[{number:1},{number:2},{number:3}],aiRoleTop:{win:[1,2,3],top2:[1,2,3,4],top3:[1,2,3,4,5,6]},result:{first:1,second:2,third:4}},
+    {modelVersion:'1.13-role-models',aiTop3:[{number:2},{number:3},{number:4}],aiRoleTop:{win:[2,3,4],top2:[2,3,4,5],top3:[2,3,4,5,6,7]},result:{first:3,second:2,third:4}},
+    {modelVersion:'1.12-sim-calibrated',aiTop3:[{number:5},{number:1},{number:2}],result:{first:5,second:6,third:7}}
+  ];
+  const d13=C.rankingDiagnostics(h,'1.13'),rd=C.roleRankingDiagnostics(h,'1.13');
+  if(d13.counts.n1!==2||Math.abs(d13.top1Win-.5)>1e-9)throw Error('v1.13 prefix diagnostics '+JSON.stringify(d13));
+  if(Math.abs(rd.winTop1-.5)>1e-9||Math.abs(rd.top2Exact-1)>1e-9||Math.abs(rd.top3AtLeast2-1)>1e-9)throw Error('v1.13 role diagnostics '+JSON.stringify(rd));
+  console.log('v1.13 diagnostics: OK');
+}
+{
+  const a=C.ROLE_BASE_WEIGHTS_113;
+  if(Math.abs(a.win.ability-a.top3.ability)<.05||Math.abs(a.top3.suitability-a.win.suitability)<.05)throw Error('v1.13 role weights not separated');
+  console.log('v1.13 separate weights: OK');
+}
