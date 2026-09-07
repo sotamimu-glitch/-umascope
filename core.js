@@ -408,6 +408,83 @@ function allSuggestedTickets(x){
   }
   return out
 }
+
+function payoutKey(type,keyOrNums){
+  const typ=canonType(type),nums=Array.isArray(keyOrNums)?keyOrNums.map(Number).filter(Number.isFinite):ticketNumbers({type:typ,key:String(keyOrNums||'')});
+  const key=nums.length?comboKey(nums):String(keyOrNums||'').trim();
+  return `${typ}|${key}`
+}
+function parseOfficialPayoutText(text){
+  const out={};
+  for(const raw of String(text||'').split(/[\n,、]+/)){
+    const s=raw.trim();if(!s)continue;
+    const m=s.match(/^(単勝|ワイド|馬複|馬連|三連複)\s*[:：]\s*([0-9０-９\-－−]+)\s*=\s*([0-9０-９,，]+)\s*$/);
+    if(!m)continue;
+    const typ=canonType(m[1]),nums=fwDigits(m[2]).split(/[-－−]/).map(Number).filter(Number.isFinite),amt=Number(fwDigits(m[3]).replace(/[，,]/g,''));
+    if(nums.length&&Number.isFinite(amt)&&amt>=0)out[payoutKey(typ,nums)]=amt
+  }
+  return out
+}
+function parseRefundText(text){
+  const out=[];
+  for(const raw of String(text||'').split(/[\n,、]+/)){
+    const s=raw.trim();if(!s)continue;
+    const m=s.match(/^(?:返還\s*[:：]\s*)?(単勝|ワイド|馬複|馬連|三連複)\s*[:：]\s*([0-9０-９\-－−]+)$/);
+    if(!m)continue;
+    const typ=canonType(m[1]),nums=fwDigits(m[2]).split(/[-－−]/).map(Number).filter(Number.isFinite);
+    if(nums.length)out.push(payoutKey(typ,nums))
+  }
+  return [...new Set(out)]
+}
+function officialPayoutForTicket(entry,t){
+  const key=payoutKey(t.type,t.numbers?.length?t.numbers:t.key),refunds=new Set(entry?.refundKeys||[]);
+  if(refunds.has(key))return {amount:100,refund:true,key};
+  const map=entry?.officialPayouts||{},v=Number(map[key]);
+  if(Number.isFinite(v)&&v>=0)return {amount:v,refund:false,key};
+  return {amount:null,refund:false,key}
+}
+function exactRaceStats(entry,source='all',type=null){
+  const result=historyResult(entry),tickets=(source==='purchase'?historyTickets(entry):allSuggestedTickets(entry)).filter(t=>!type||canonType(t.type)===canonType(type));
+  let graded=0,hits=0,stake=0,payout=0,missing=0,anyHit=false;
+  for(const t of tickets){
+    let g=ticketGrade(t,result),official=officialPayoutForTicket(entry,t);
+    if(g==null&&official.amount==null)continue;
+    graded++;stake+=100;
+    if(official.refund){payout+=100;continue}
+    if(official.amount!=null){
+      // Official payout map overrides ordinary grading; useful for dead-heats.
+      if(official.amount>0){hits++;anyHit=true;payout+=official.amount}
+      continue
+    }
+    if(g){
+      hits++;anyHit=true;missing++;
+    }
+    // Losing tickets need no payout entry; their payout is exactly 0.
+  }
+  return {tickets:tickets.length,graded,hits,rate:graded?hits/graded:null,stake,payout,missing,complete:graded>0&&missing===0,anyHit,roi:graded&&missing===0? payout/stake:null}
+}
+function exactStats(history,source='all',type=null){
+  let tickets=0,graded=0,hits=0,races=0,raceHits=0,completeRaces=0,completeTickets=0,stake=0,payout=0,missingWins=0;
+  for(const x of history||[]){
+    const s=exactRaceStats(x,source,type);
+    tickets+=s.tickets;graded+=s.graded;hits+=s.hits;missingWins+=s.missing;
+    if(s.graded){races++;if(s.anyHit)raceHits++}
+    if(s.complete){completeRaces++;completeTickets+=s.graded;stake+=s.stake;payout+=s.payout}
+  }
+  return {tickets,graded,hits,rate:graded?hits/graded:null,races,raceHits,raceRate:races?raceHits/races:null,completeRaces,completeTickets,stake,payout,roi:stake?payout/stake:null,missingWins}
+}
+function actualPurchaseStats(history){
+  let races=0,stake=0,payout=0;
+  for(const x of history||[]){
+    const s=Number(x.stake)||0;if(s<=0)continue;
+    races++;stake+=s;payout+=Number(x.ret)||0
+  }
+  return {races,stake,payout,roi:stake?payout/stake:null}
+}
+function goalStats(history){
+  const ex=exactStats(history,'purchase');
+  return {races:ex.races,raceHits:ex.raceHits,hitRate:ex.raceRate,stake:ex.stake,payout:ex.payout,roi:ex.roi,completeRaces:ex.completeRaces,missingWins:ex.missingWins,targetHit:.70,targetRoi:1.20}
+}
 function suggestedRaceStats(x){
   const result=historyResult(x),tickets=allSuggestedTickets(x);
   let graded=0,hits=0,withOdds=0,stake=0,payout=0;
@@ -450,7 +527,6 @@ function filtersMatch(x,t,f={}){const m=raceMeta(x);if(f.type&&f.type!=='all'&&c
 function backtestRows(history,filters={}){const out=[];for(const x of history||[]){const result=historyResult(x);for(const t0 of backtestTickets(x)){const t=normalizeStoredTicket(t0);if(!t||!filtersMatch(x,t,filters))continue;const grade=ticketGrade(t,result);if(grade==null)continue;const odds=Number(t.odds),roiEligible=Number.isFinite(odds)&&odds>=1;out.push({entry:x,ticket:t,hit:!!grade,odds:roiEligible?odds:null,stake:roiEligible?100:0,payout:roiEligible&&grade?100*odds:0,meta:raceMeta(x),evBand:evBand(t.ev)})}}return out}
 function summarizeBacktest(history,filters={}){const rows=backtestRows(history,filters),withOdds=rows.filter(x=>x.stake>0),hits=rows.filter(x=>x.hit).length,stake=withOdds.reduce((s,x)=>s+x.stake,0),payout=withOdds.reduce((s,x)=>s+x.payout,0);return {rows,total:rows.length,hits,rate:rows.length?hits/rows.length:null,withOdds:withOdds.length,stake,payout,roi:stake?payout/stake:null}}
 function groupBacktest(history,dimension,filters={}){const rows=backtestRows(history,filters),map=new Map();for(const r of rows){let key='';if(dimension==='type')key=r.ticket.type;else if(dimension==='market')key=r.meta.market==='central'?'中央':'地方';else if(dimension==='course')key=r.meta.course||'不明';else if(dimension==='surface')key=r.meta.surface||'不明';else if(dimension==='distanceBand')key=r.meta.distanceBand;else if(dimension==='going')key=r.meta.going||'不明';else if(dimension==='evBand')key=r.evBand;else key='全体';const z=map.get(key)||{key,total:0,hits:0,withOdds:0,stake:0,payout:0};z.total++;if(r.hit)z.hits++;if(r.stake){z.withOdds++;z.stake+=r.stake;z.payout+=r.payout}map.set(key,z)}return [...map.values()].map(z=>({...z,rate:z.total?z.hits/z.total:null,roi:z.stake?z.payout/z.stake:null})).sort((a,b)=>(b.roi??-1)-(a.roi??-1)||b.total-a.total)}
-function goalStats(history){let races=0,raceHits=0,stake=0,payout=0;for(const x of history||[]){const result=historyResult(x),ts=historyTickets(x);if(!ts.length||!result.first)continue;races++;let any=false;for(const t of ts){const g=ticketGrade(t,result);if(g==null)continue;if(g)any=true;const o=Number(t.odds);if(Number.isFinite(o)&&o>=1){stake+=100;if(g)payout+=100*o}}if(any)raceHits++}return {races,raceHits,hitRate:races?raceHits/races:null,stake,payout,roi:stake?payout/stake:null,targetHit:.70,targetRoi:1.20}}
 function walkForward(history,filters={}){const entries=(history||[]).filter(x=>historyResult(x).first!=null&&backtestTickets(x).some(t=>normalizeStoredTicket(t)?.odds!=null&&normalizeStoredTicket(t)?.ev!=null)).slice().sort((a,b)=>String(a.date||a.createdAt||a.id).localeCompare(String(b.date||b.createdAt||b.id)));if(entries.length<6)return {enough:false,races:entries.length};const cut=Math.max(3,Math.floor(entries.length*.7)),train=entries.slice(0,cut),test=entries.slice(cut),thresholds=[1.0,1.1,1.2,1.3],minTickets=Math.max(5,Math.floor(train.length*.6));const candidates=thresholds.map(th=>({threshold:th,...summarizeBacktest(train,{...filters,minEv:th})})).filter(x=>x.withOdds>=minTickets&&x.roi!=null);if(!candidates.length)return {enough:false,races:entries.length,reason:'tickets'};candidates.sort((a,b)=>b.roi-a.roi||b.threshold-a.threshold);const best=candidates[0],validation=summarizeBacktest(test,{...filters,minEv:best.threshold});return {enough:true,races:entries.length,trainRaces:train.length,testRaces:test.length,threshold:best.threshold,train:best,validation}}
 
 // ============================================================
@@ -1021,4 +1097,4 @@ function parse(raw){
   if(r)r.classLevel=classLevelFromText([r.name,p.title,p.text,p.jraText,p.narDetailText].filter(Boolean).join(' '),r.type);
   return r
 }
-const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,weightWalkForward,roleWeightWalkForward,calibrationStatus,learnTicketThresholds,rankingDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
+const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,weightWalkForward,roleWeightWalkForward,calibrationStatus,learnTicketThresholds,rankingDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);

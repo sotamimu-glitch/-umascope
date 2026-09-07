@@ -179,3 +179,54 @@ console.log('v1.9 tests: ALL OK');
   if(Math.abs(a.win.ability-a.top3.ability)<.05||Math.abs(a.top3.suitability-a.win.suitability)<.05)throw Error('v1.13 role weights not separated');
   console.log('v1.13 separate weights: OK');
 }
+
+
+// v1.14 official payout / exact ROI regression
+{
+  const x={
+    aiTickets:[
+      {type:'単勝',key:'3',numbers:[3],odds:3.0},
+      {type:'ワイド',key:'3-5',numbers:[3,5],odds:2.0},
+      {type:'馬複',key:'3-7',numbers:[3,7],odds:5.0},
+      {type:'三連複',key:'3-5-7',numbers:[3,5,7],odds:8.0}
+    ],
+    tickets:[
+      {type:'単勝',key:'3',numbers:[3],odds:3.0},
+      {type:'馬複',key:'3-7',numbers:[3,7],odds:5.0}
+    ],
+    result:{first:3,second:7,third:5},
+    officialPayouts:{
+      '単勝|3':420,
+      '馬複|3-7':1250,
+      'ワイド|3-5':350,
+      '三連複|3-5-7':3200
+    }
+  };
+  const all=C.exactRaceStats(x,'all'),buy=C.exactRaceStats(x,'purchase');
+  if(!all.complete||all.graded!==4||all.hits!==4||all.stake!==400||all.payout!==5220||Math.abs(all.roi-13.05)>1e-9)throw Error('v1.14 exact all '+JSON.stringify(all));
+  if(!buy.complete||buy.stake!==200||buy.payout!==1670||Math.abs(buy.roi-8.35)>1e-9)throw Error('v1.14 exact purchase '+JSON.stringify(buy));
+  console.log('v1.14 exact official payout: OK');
+}
+{
+  const x={
+    aiTickets:[{type:'単勝',key:'3',numbers:[3]},{type:'ワイド',key:'3-5',numbers:[3,5]}],
+    result:{first:3,second:7,third:5},
+    officialPayouts:{'単勝|3':420}
+  };
+  const s=C.exactRaceStats(x,'all');
+  if(s.complete||s.missing!==1||s.roi!==null)throw Error('v1.14 missing payout handling '+JSON.stringify(s));
+  console.log('v1.14 missing payout exclusion: OK');
+}
+{
+  const p=C.parseOfficialPayoutText('単勝:5=680, ワイド:5-7=720\n三連複:1-5-7=3210');
+  const r=C.parseRefundText('単勝:4, 返還:馬複:4-7');
+  if(p['単勝|5']!==680||p['ワイド|5-7']!==720||p['三連複|1-5-7']!==3210)throw Error('v1.14 payout parser '+JSON.stringify(p));
+  if(!r.includes('単勝|4')||!r.includes('馬複|4-7'))throw Error('v1.14 refund parser '+JSON.stringify(r));
+  console.log('v1.14 payout/refund parser: OK');
+}
+{
+  const h=[{stake:1000,ret:1450},{stake:500,ret:0},{stake:0,ret:999}];
+  const a=C.actualPurchaseStats(h);
+  if(a.races!==2||a.stake!==1500||a.payout!==1450||Math.abs(a.roi-1450/1500)>1e-9)throw Error('v1.14 actual stats');
+  console.log('v1.14 actual purchase stats: OK');
+}
