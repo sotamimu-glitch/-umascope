@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.14",
+  "name": "UmaScope Free AutoBet 1.15",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "公式100円払戻金を使った確定回収率、AI全買い目・購入候補・実購入の3系統成績を分離した競馬分析PWA"
+  "description": "直近8走だけ詳細保存し、古い近走・AI予測履歴・買い目履歴を圧縮する省容量モード搭載競馬分析PWA"
 }

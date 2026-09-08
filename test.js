@@ -230,3 +230,38 @@ console.log('v1.9 tests: ALL OK');
   if(a.races!==2||a.stake!==1500||a.payout!==1450||Math.abs(a.roi-1450/1500)>1e-9)throw Error('v1.14 actual stats');
   console.log('v1.14 actual purchase stats: OK');
 }
+
+
+// v1.15 packed storage regression
+{
+  const x={
+    modelVersion:'1.15-storage-saver',market:'central',
+    result:{first:1,second:2,third:3},
+    aiForecastPacked:[
+      [1,.32,.58,.79,1,1,1,75,68,62,60,72],
+      [2,.24,.49,.72,2,2,2,69,72,66,58,70],
+      [3,.16,.38,.63,3,3,3,61,74,68,55,65]
+    ]
+  };
+  const f=C.forecastRows(x);
+  if(f.length!==3||f[0].number!==1||f[0].indices.ability!==75||f[1].roleRanks.top2!==2)throw Error('v1.15 packed forecast decode '+JSON.stringify(f));
+  const cs=C.calibrationStatus([x],'central');
+  if(cs.win!==3||cs.top2!==3||cs.top3!==3)throw Error('v1.15 packed calibration '+JSON.stringify(cs));
+  console.log('v1.15 packed forecast learning: OK');
+}
+{
+  const x={
+    tickets:[{t:'単勝',k:'3',n:[3],e:1.3,p:.2,o:6.5},{t:'馬複',k:'3-7',n:[3,7],e:1.5,p:.1,o:15}],
+    result:{first:3,second:7,third:5},
+    officialPayouts:{'単勝|3':650,'馬複|3-7':1500}
+  };
+  const s=C.exactRaceStats(x,'purchase');
+  if(s.graded!==2||s.hits!==2||s.payout!==2150||Math.abs(s.roi-10.75)>1e-9)throw Error('v1.15 compact purchase tickets '+JSON.stringify(s));
+  console.log('v1.15 compact ticket history: OK');
+}
+{
+  const h={archiveSummary:{n:10,perfSum:65,surfaces:{芝:[6,42]},courses:{東京:[4,30]},distances:{'1300～1600m':[5,36]},goings:{良:[7,49]}}};
+  const s=C.archiveConditionSignal(h,{surface:'芝',courseName:'東京',distance:1600,going:'良'});
+  if(!(s>0))throw Error('v1.15 archive signal '+s);
+  console.log('v1.15 archive summary signal: OK',s);
+}

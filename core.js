@@ -371,7 +371,7 @@ function realisticBets(rows,comboOdds={},opts={}){return targetPlan(rows,comboOd
 function ticketNumbers(t){if(Array.isArray(t?.numbers)&&t.numbers.length)return t.numbers.map(Number).filter(Number.isFinite);return String(t?.key??'').split(/[-－−–—]/).map(Number).filter(Number.isFinite)}
 function historyResult(x){const r=x?.result||{};return {first:Number(r.first??x?.winner)||null,second:Number(r.second)||null,third:Number(r.third)||null}}
 function canonType(t){return t==='馬連'?'馬複':t}
-function historyTickets(x){const out=[];for(const t of x?.tickets||[])if(t?.type&&t?.key!=null)out.push({...t,type:canonType(t.type),numbers:ticketNumbers(t)});if(x?.pick!=null&&!out.some(t=>t.type==='単勝'))out.unshift({type:'単勝',key:String(x.pick),numbers:[Number(x.pick)],ev:x.ev??null});const seen=new Set();return out.filter(t=>{const k=t.type+'|'+t.key;if(seen.has(k))return false;seen.add(k);return true})}
+function historyTickets(x){const out=[];for(const t0 of x?.tickets||[]){const t=normalizeStoredTicket(t0);if(t)out.push(t)}if(x?.pick!=null&&!out.some(t=>t.type==='単勝'))out.unshift({type:'単勝',key:String(x.pick),numbers:[Number(x.pick)],ev:x.ev??null});const seen=new Set();return out.filter(t=>{const k=t.type+'|'+t.key;if(seen.has(k))return false;seen.add(k);return true})}
 function ticketGrade(t,result){
   const type=canonType(t?.type),nums=[...new Set(ticketNumbers(t).map(Number).filter(Number.isFinite))],r=result||{};
   const first=Number(r.first)||null,second=Number(r.second)||null,third=Number(r.third)||null;
@@ -683,9 +683,19 @@ function normalizeWeights(w){
 function modelScore(ix,weights=BASE_MODEL_WEIGHTS_112){weights=normalizeWeights(weights);return Math.round(Object.entries(weights).reduce((s,[k,w])=>s+(Number(ix?.[k])||50)*w,0))}
 function judgement(ix){const score=modelScore(ix,BASE_MODEL_WEIGHTS_112);return {score,grade:overallGrade(score)}}
 
+function forecastRows(x){
+  if(Array.isArray(x?.aiForecast)&&x.aiForecast.length)return x.aiForecast;
+  if(Array.isArray(x?.aiForecastPacked))return x.aiForecastPacked.map(a=>({
+    number:Number(a[0]),pWin:Number(a[1]),pTop2:Number(a[2]),pTop3:Number(a[3]),
+    roleRanks:{win:Number(a[4])||null,top2:Number(a[5])||null,top3:Number(a[6])||null},
+    indices:{ability:Number(a[7]),suitability:Number(a[8]),pace:Number(a[9]),jockey:Number(a[10]),form:Number(a[11])}
+  }));
+  return []
+}
 function forecastEntries(history,market){
-  return (history||[]).filter(x=>historyResult(x).first!=null&&Array.isArray(x.aiForecast)&&x.aiForecast.length>=3&&(market?((x.market||x.type)===market):true))
-    .slice().sort((a,b)=>String(a.date||a.createdAt||a.id).localeCompare(String(b.date||b.createdAt||b.id)));
+  return (history||[]).filter(x=>historyResult(x).first!=null&&forecastRows(x).length>=3&&(market?((x.market||x.type)===market):true))
+    .map(x=>({...x,aiForecast:forecastRows(x)}))
+    .sort((a,b)=>String(a.date||a.createdAt||a.id).localeCompare(String(b.date||b.createdAt||b.id)));
 }
 function learnWeightsFromEntries(entries){
   const keys=['ability','suitability','pace','jockey','form'],lifts=Object.fromEntries(keys.map(k=>[k,[]]));
@@ -801,7 +811,7 @@ function ticketThresholdStats(entries,type,th){
   return {n,h,rate:n?h/n:null,roi:stake?payout/stake:null}
 }
 function learnTicketThresholds(history,market){
-  const entries=(history||[]).filter(x=>/^1\.(12|13)/.test(String(x.modelVersion||''))&&historyResult(x).first!=null&&(market?((x.market||x.type)===market):true)).slice().sort((a,b)=>String(a.date||a.createdAt||a.id).localeCompare(String(b.date||b.createdAt||b.id)));
+  const entries=(history||[]).filter(x=>/^1\.(12|13|14|15)/.test(String(x.modelVersion||''))&&historyResult(x).first!=null&&(market?((x.market||x.type)===market):true)).slice().sort((a,b)=>String(a.date||a.createdAt||a.id).localeCompare(String(b.date||b.createdAt||b.id)));
   const out={};for(const [type,def] of Object.entries(DEFAULT_TICKET_THRESHOLDS_112))out[type]={threshold:def,learned:false,races:entries.length};
   if(entries.length<25)return out;
   const cut=Math.max(18,Math.floor(entries.length*.7)),train=entries.slice(0,cut),test=entries.slice(cut),grid=[1.05,1.10,1.15,1.20,1.25,1.30,1.40,1.50,1.70];
@@ -880,8 +890,8 @@ function roleTargetSet(result,role){
 function roleForecastEntries(history,market){
   return (history||[]).filter(x=>{
     const r=historyResult(x);
-    return r.first!=null&&Array.isArray(x.aiForecast)&&x.aiForecast.length>=3&&(market?((x.market||x.type)===market):true)
-  }).slice().sort((a,b)=>String(a.date||a.createdAt||a.id).localeCompare(String(b.date||b.createdAt||b.id)))
+    return r.first!=null&&forecastRows(x).length>=3&&(market?((x.market||x.type)===market):true)
+  }).map(x=>({...x,aiForecast:forecastRows(x)})).sort((a,b)=>String(a.date||a.createdAt||a.id).localeCompare(String(b.date||b.createdAt||b.id)))
 }
 function roleWeightsBase(role){return normalizeWeights(ROLE_BASE_WEIGHTS_113[role]||ROLE_BASE_WEIGHTS_113.win)}
 function learnRoleWeights(entries,role){
@@ -935,18 +945,31 @@ function finishConsistency(h){
   const mean=vals.reduce((a,b)=>a+b,0)/vals.length,sd=Math.sqrt(vals.reduce((s,v)=>s+(v-mean)**2,0)/vals.length);
   return {score:clamp(Math.round(50+(mean-5)*5-sd*4),25,78),samples:vals.length}
 }
+function archiveBucketAvg(v){return Array.isArray(v)&&Number(v[0])>0?Number(v[1])/Number(v[0]):null}
+function archiveConditionSignal(h,r){
+  const a=h?.archiveSummary;if(!a||Number(a.n)<1)return 0;
+  const vals=[],add=(v,w)=>{if(Number.isFinite(Number(v)))vals.push({v:Number(v),w})};
+  add(Number(a.perfSum)/Math.max(1,Number(a.n)),.30);
+  add(archiveBucketAvg(a.surfaces?.[r.surface]),.20);
+  add(archiveBucketAvg(a.courses?.[String(r.courseName||'').replace(/^Ｊ/, '')]),.20);
+  add(archiveBucketAvg(a.distances?.[distanceBand(r.distance)]),.18);
+  add(archiveBucketAvg(a.goings?.[r.going]),.12);
+  if(!vals.length)return 0;
+  const avg=weightedCustom(vals)??5;
+  return clamp((avg-5)*1.15,-2.5,2.5)
+}
 function roleScoreForRow(x,role,w,r,relative){
   const abs=Object.entries(normalizeWeights(w)).reduce((s,[k,v])=>s+(Number(x.indices?.[k])||50)*v,0);
   const rel=Object.entries(normalizeWeights(w)).reduce((s,[k,v])=>s+(Number(relative?.[x.h.number]?.[k])||50)*v,0);
   let score=.55*abs+.45*rel;
-  const st=styleProfile(x.h),cons=finishConsistency(x.h);
+  const st=styleProfile(x.h),cons=finishConsistency(x.h),archiveSig=archiveConditionSignal(x.h,r);
   if(role==='win'){
-    score+=(Number(x.indices.ability)-50)*.035+(Number(x.indices.form)-50)*.025;
+    score+=(Number(x.indices.ability)-50)*.035+(Number(x.indices.form)-50)*.025+archiveSig*.28;
     if(st.gain!=null&&st.gain>.10)score+=Math.min(3,st.gain*12)
   }else if(role==='top2'){
-    score+=(cons.score-50)*.055+(Number(x.indices.suitability)-50)*.018
+    score+=(cons.score-50)*.055+(Number(x.indices.suitability)-50)*.018+archiveSig*.45
   }else{
-    score+=(cons.score-50)*.085+(Number(x.indices.suitability)-50)*.030;
+    score+=(cons.score-50)*.085+(Number(x.indices.suitability)-50)*.030+archiveSig*.62;
     if(st.early!=null&&st.early<=.42)score+=1.2
   }
   return score
@@ -1097,4 +1120,4 @@ function parse(raw){
   if(r)r.classLevel=classLevelFromText([r.name,p.title,p.text,p.jraText,p.narDetailText].filter(Boolean).join(' '),r.type);
   return r
 }
-const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,weightWalkForward,roleWeightWalkForward,calibrationStatus,learnTicketThresholds,rankingDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
+const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationStatus,learnTicketThresholds,rankingDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
