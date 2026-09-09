@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.15",
+  "name": "UmaScope Free AutoBet 1.16",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "直近8走だけ詳細保存し、古い近走・AI予測履歴・買い目履歴を圧縮する省容量モード搭載競馬分析PWA"
+  "description": "単勝・馬連・ワイドに絞り、実績ベース購入フィルターと荒れ度予測（荒・中・堅）を追加した競馬分析PWA"
 }

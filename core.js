@@ -811,7 +811,7 @@ function ticketThresholdStats(entries,type,th){
   return {n,h,rate:n?h/n:null,roi:stake?payout/stake:null}
 }
 function learnTicketThresholds(history,market){
-  const entries=(history||[]).filter(x=>/^1\.(12|13|14|15)/.test(String(x.modelVersion||''))&&historyResult(x).first!=null&&(market?((x.market||x.type)===market):true)).slice().sort((a,b)=>String(a.date||a.createdAt||a.id).localeCompare(String(b.date||b.createdAt||b.id)));
+  const entries=(history||[]).filter(x=>/^1\.(12|13|14|15|16)/.test(String(x.modelVersion||''))&&historyResult(x).first!=null&&(market?((x.market||x.type)===market):true)).slice().sort((a,b)=>String(a.date||a.createdAt||a.id).localeCompare(String(b.date||b.createdAt||b.id)));
   const out={};for(const [type,def] of Object.entries(DEFAULT_TICKET_THRESHOLDS_112))out[type]={threshold:def,learned:false,races:entries.length};
   if(entries.length<25)return out;
   const cut=Math.max(18,Math.floor(entries.length*.7)),train=entries.slice(0,cut),test=entries.slice(cut),grid=[1.05,1.10,1.15,1.20,1.25,1.30,1.40,1.50,1.70];
@@ -1115,9 +1115,69 @@ function roleRankingDiagnostics(history,prefix='1.13'){
   const q=(h,z)=>z?h/z:null;return {winTop1:q(w1,n),top2Exact:q(both2,n2),top3AtLeast2:q(two3,n3),top3All:q(all3,n3),counts:{n,n2,n3}}
 }
 function currentModelHistory(history,prefix='1.13'){return (history||[]).filter(x=>String(x?.modelVersion||'').startsWith(prefix))}
+
+// ============================================================
+// v1.16 — three bet types + empirical purchase filter + chaos
+// ============================================================
+const ACTIVE_TYPES_116=['単勝','馬複','ワイド'];
+function raceChaosFeatures(rows,r={}){
+  const a=rows.slice().sort((x,y)=>y.pWin-x.pWin),p1=Number(a[0]?.pWin)||0,p2=Number(a[1]?.pWin)||0,p3=Number(a[2]?.pWin)||0;
+  const top3=p1+p2+p3,spread=p1-p2,n=Math.max(rows.length,2),entropy=-rows.reduce((s,x)=>{const p=Math.max(1e-9,Number(x.pWin)||0);return s+p*Math.log(p)},0)/Math.log(n);
+  const odds=rows.map(x=>Number(x.odds)).filter(x=>Number.isFinite(x)&&x>=1),favOdds=odds.length?Math.min(...odds):null,front=rows.filter(x=>['逃げ','先行'].includes(x.indices?.style)).length;
+  return {p1,p2,p3,top3,spread,field:rows.length,entropy,favOdds,front}
+}
+function predictChaos(rows,r={}){
+  const f=raceChaosFeatures(rows,r);let s=0;
+  s+=clamp((f.entropy-.72)/.20,0,1)*3.1+s*0;
+  s+=clamp((.30-f.p1)/.18,0,1)*2.3;
+  s+=clamp((.60-f.top3)/.28,0,1)*1.8;
+  s+=clamp((.10-f.spread)/.09,0,1)*1.0;
+  s+=clamp((f.field-12)/6,0,1)*1.1;
+  if(f.favOdds!=null)s+=clamp((f.favOdds-2.2)/2.8,0,1)*1.0;
+  if(f.front>=4)s+=.45;
+  return {label:s>=5?'荒':s>=2.7?'中':'堅',score:+s.toFixed(2),features:f}
+}
+function empiricalContextKey(x){return {market:(x.market||x.type)==='local'?'地方':'中央',surf:x.surface||'不明',dist:distanceBand(x.distance),chaos:x.chaosLabel||'不明'}}
+function empiricalTicketRows(history,type){
+  const out=[];for(const x of history||[]){const ctx=empiricalContextKey(x),res=historyResult(x);for(const t of allSuggestedTickets(x)){if(canonType(t.type)!==canonType(type))continue;const g=ticketGrade(t,res);if(g==null)continue;const po=officialPayoutForTicket(x,t);out.push({ctx,hit:!!g,payout:po.amount,ev:Number(t.ev),prob:Number(t.prob)})}}return out
+}
+function empiricalGroupStats(rows,pred){
+  let n=0,h=0,known=0,stake=0,payout=0;for(const x of rows){if(!pred(x))continue;n++;if(x.hit)h++;if(!x.hit){known++;stake+=100}else if(x.payout!=null){known++;stake+=100;payout+=x.payout}}
+  return {n,h,rate:n?h/n:null,known,roi:stake?payout/stake:null}
+}
+function empiricalTicketGate(history,type,current={}){
+  type=canonType(type);const rows=empiricalTicketRows(history,type),ctx=current.context||{},ev=Number(current.ev),prob=Number(current.prob)||0;
+  const specs=[['同券種',x=>true,35],['同市場',x=>x.ctx.market===ctx.market,25],['同市場×芝ダ',x=>x.ctx.market===ctx.market&&x.ctx.surf===ctx.surf,18],['同荒れ度',x=>x.ctx.chaos===ctx.chaos,18],['同市場×荒れ度',x=>x.ctx.market===ctx.market&&x.ctx.chaos===ctx.chaos,12],['同距離帯',x=>x.ctx.dist===ctx.dist,18]];
+  const evidence=[];for(const [name,pred,min] of specs){const z=empiricalGroupStats(rows,pred);if(z.n>=min)evidence.push({name,...z})}
+  const known=evidence.filter(x=>x.roi!=null),weightedRoi=known.length?known.reduce((s,x)=>s+x.roi*Math.min(x.known,60),0)/known.reduce((s,x)=>s+Math.min(x.known,60),0):null;
+  const weightedRate=evidence.length?evidence.reduce((s,x)=>s+(x.rate||0)*Math.min(x.n,60),0)/evidence.reduce((s,x)=>s+Math.min(x.n,60),0):null;
+  let evReq=({'単勝':1.12,'馬複':1.28,'ワイド':1.22}[type]||1.25);if(weightedRoi!=null){if(weightedRoi>=1.15)evReq-=.04;else if(weightedRoi<.90)evReq+=.10;else if(weightedRoi<1)evReq+=.06}
+  const minProb=({'単勝':.085,'馬複':.075,'ワイド':.20}[type]||0),pass=Number.isFinite(ev)&&ev>=evReq&&prob>=minProb&&(weightedRoi==null||weightedRoi>=.85||ev>=evReq+.08);
+  return {pass,evReq:+evReq.toFixed(2),minProb,historyRows:rows.length,weightedRoi,weightedRate,evidence,enough:rows.length>=30}
+}
+function ticketRecommendations(rows,comboOdds={},thresholds=DEFAULT_TICKET_THRESHOLDS_112){
+  if(typeof thresholds==='number')thresholds={'単勝':thresholds,'ワイド':thresholds,'馬複':thresholds};
+  const ba=combinationAdvice(rows,comboOdds,1.20),map=a=>new Map(a.map(x=>[x.key,x])),fallback=x=>Math.max(1,rows.indexOf(x)+1),rv=(x,k)=>Number(x?.roleRanks?.[k])||fallback(x);
+  const win=rows.slice().sort((a,b)=>rv(a,'win')-rv(b,'win')),top2=rows.slice().sort((a,b)=>rv(a,'top2')-rv(b,'top2')),top3=rows.slice().sort((a,b)=>rv(a,'top3')-rv(b,'top3'));
+  const single=win.slice(0,4).map(x=>({type:'単勝',key:String(x.h.number),numbers:[x.h.number],prob:Number(x.pWin??x.prob)||0,odds:x.odds,ev:x.ev,need:(thresholds['単勝']||1.12)/Math.max(Number(x.pWin??x.prob)||0,1e-9)})).sort((a,b)=>b.prob-a.prob).slice(0,2);
+  const wm=map(ba.wide),qm=map(ba.quinella),k2=(a,b)=>comboKey([a,b]),t3=top3.slice(0,6).map(x=>x.h.number),t2=top2.slice(0,5).map(x=>x.h.number),tw=win.slice(0,3).map(x=>x.h.number),wk=[],qk=[];
+  for(let i=0;i<t3.length;i++)for(let j=i+1;j<t3.length;j++)if(i<3||j<3)wk.push(k2(t3[i],t3[j]));for(const a of tw)for(const b of t2)if(a!==b)qk.push(k2(a,b));
+  const score=x=>Math.max(x?.prob||0,1e-9)*Math.pow(clamp(x?.ev??1,.75,2),.16),best=(keys,m,n)=>[...new Set(keys)].map(k=>m.get(k)).filter(Boolean).sort((a,b)=>score(b)-score(a)).slice(0,n);
+  return {single,wide:best(wk,wm,3),quinella:best(qk,qm,2),trio:[]}
+}
+function targetPlan(rows,comboOdds={},opts={}){
+  const budget=Math.max(100,Math.floor((Number(opts.budget)||1000)/100)*100),history=opts.history||[],market=opts.market||rows.modelMeta?.market||'central',race=opts.race||{},chaos=opts.chaos||predictChaos(rows,race),maxTickets=Math.min(5,Math.floor(budget/100));
+  const learned=learnTicketThresholds(history,market),thresholds=Object.fromEntries(ACTIVE_TYPES_116.map(k=>[k,Number(learned?.[k]?.threshold)||({'単勝':1.12,'馬複':1.28,'ワイド':1.22}[k])])),rec=ticketRecommendations(rows,comboOdds,thresholds),ctx={market:market==='local'?'地方':'中央',surf:race.surface||'不明',dist:distanceBand(race.distance),chaos:chaos.label};
+  let pool=[...rec.single,...rec.wide,...rec.quinella].map(x=>({...x,empiricalGate:empiricalTicketGate(history,x.type,{context:ctx,ev:x.ev,prob:x.prob})})).filter(x=>x.odds!=null&&x.ev!=null&&x.empiricalGate.pass).sort((a,b)=>b.prob-a.prob||b.ev-a.ev);
+  const chosen=[],caps={'単勝':1,'ワイド':2,'馬複':2},counts={};while(chosen.length<maxTickets){let best=null,bestHit=portfolioHitProbability(chosen,rows),bestScore=0;for(const c of pool){const typ=canonType(c.type);if(chosen.includes(c)||(counts[typ]||0)>=caps[typ])continue;const hp=portfolioHitProbability([...chosen,c],rows),gain=hp-bestHit,hb=clamp((c.empiricalGate.weightedRoi??1)-1,-.3,.4),sc=gain*.80+Math.max(0,c.ev-1)*.015+hb*.03;if(sc>bestScore){best=c;bestScore=sc;bestHit=hp}}if(!best)break;chosen.push(best);counts[canonType(best.type)]=(counts[canonType(best.type)]||0)+1;if(chosen.length>=2&&bestScore<.025)break}
+  const hitProb=portfolioHitProbability(chosen,rows),roi=chosen.length?chosen.reduce((s,x)=>s+x.ev,0)/chosen.length:null,meets=chosen.length>0&&roi!=null&&roi>=1.12,tickets=meets?chosen.map(x=>({...x,amount:100})):[];
+  return {tickets,bestEffort:chosen,recommendations:rec,budget,targetRoi:.20+1,targetHit:.70,hitProb,roi,meets,anchor:rows.roleOrders?.win?.[0]??rows[0]?.h.number,confidence:rows.reduce((s,x)=>s+(x.auto?.confidence||0),0)/Math.max(rows.length,1),stance:meets?'購入候補あり':'見送り',chaos,empiricalContext:ctx,thresholds}
+}
+function realisticBets(rows,comboOdds={},opts={}){return targetPlan(rows,comboOdds,opts)}
+function allTypeAccuracy(history){return ACTIVE_TYPES_116.map(type=>typeAccuracy(history,type))}
 function parse(raw){
   const p=parsePayload(raw),r=parseNAR(p)||parseJRA(p);
   if(r)r.classLevel=classLevelFromText([r.name,p.title,p.text,p.jraText,p.narDetailText].filter(Boolean).join(' '),r.type);
   return r
 }
-const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationStatus,learnTicketThresholds,rankingDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
+const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationStatus,learnTicketThresholds,rankingDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ACTIVE_TYPES_116,raceChaosFeatures,predictChaos,empiricalTicketGate,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);

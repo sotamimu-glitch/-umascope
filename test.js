@@ -97,7 +97,7 @@ console.log('v1.9 tests: ALL OK');
   const allowedQ=new Set(['1-2','1-3','2-3']);
   if(rec.wide.some(x=>!allowedWide.has(x.key)))throw Error('v1.11 wide not top-rank centered '+JSON.stringify(rec.wide));
   if(rec.quinella.some(x=>!allowedQ.has(x.key)))throw Error('v1.11 quinella not top-rank centered '+JSON.stringify(rec.quinella));
-  if(rec.trio.length!==1||!['1-2-3','1-2-4','1-3-4'].includes(rec.trio[0].key))throw Error('v1.11 trio not top-rank centered '+JSON.stringify(rec.trio));
+  if(rec.trio.length!==0)throw Error('v1.16 trio should be disabled '+JSON.stringify(rec.trio));
   console.log('v1.11 stable combo selection: OK', rec.wide.map(x=>x.key),rec.quinella.map(x=>x.key),rec.trio.map(x=>x.key));
 }
 
@@ -126,7 +126,7 @@ console.log('v1.9 tests: ALL OK');
   const qsum=Object.values(sim.quinella).reduce((a,b)=>a+b,0),tsum=Object.values(sim.trio).reduce((a,b)=>a+b,0),wsum=Object.values(sim.wide).reduce((a,b)=>a+b,0);
   if(Math.abs(qsum-1)>.05||Math.abs(tsum-1)>.05||Math.abs(wsum-3)>.20)throw Error('v1.12 combo sums '+[qsum,wsum,tsum]);
   const rec=C.ticketRecommendations(rows,rr.comboOdds,C.learnTicketThresholds([],rr.type));
-  if(!rec.wide.length||!rec.quinella.length||!rec.trio.length)throw Error('v1.12 recommendations missing');
+  if(!rec.wide.length||!rec.quinella.length)throw Error('v1.16 active recommendations missing');
   console.log('v1.12 simulation probabilities: OK',rows.map(x=>[x.h.number,x.pWin.toFixed(3),x.pTop2.toFixed(3),x.pTop3.toFixed(3)]));
 }
 {
@@ -160,7 +160,7 @@ console.log('v1.9 tests: ALL OK');
   if(Math.abs(s1-1)>.02||Math.abs(s2-2)>.03||Math.abs(s3-3)>.04)throw Error('v1.13 probability sums '+[s1,s2,s3]);
   for(const x of rows){if(!x.roleRanks||x.pWin>x.pTop2+.01||x.pTop2>x.pTop3+.01)throw Error('v1.13 roles/monotonic '+JSON.stringify(x))}
   const rec=C.ticketRecommendations(rows,rr.comboOdds,C.learnTicketThresholds([],rr.type));
-  if(!rec.single.length||!rec.wide.length||!rec.quinella.length||!rec.trio.length)throw Error('v1.13 recommendations missing');
+  if(!rec.single.length||!rec.wide.length||!rec.quinella.length)throw Error('v1.16 active recommendations missing');
   console.log('v1.13 role models: OK',rows.map(x=>[x.h.number,x.roleRanks,x.pWin.toFixed(3),x.pTop2.toFixed(3),x.pTop3.toFixed(3)]));
 }
 {
@@ -264,4 +264,21 @@ console.log('v1.9 tests: ALL OK');
   const s=C.archiveConditionSignal(h,{surface:'芝',courseName:'東京',distance:1600,going:'良'});
   if(!(s>0))throw Error('v1.15 archive signal '+s);
   console.log('v1.15 archive summary signal: OK',s);
+}
+
+// v1.16 regression
+{
+ const rows=[
+  {h:{number:1},pWin:.38,pTop2:.62,pTop3:.80,prob:.38,odds:3,ev:1.14,roleRanks:{win:1,top2:1,top3:1},indices:{style:'先行'}},
+  {h:{number:2},pWin:.25,pTop2:.51,pTop3:.72,prob:.25,odds:5,ev:1.25,roleRanks:{win:2,top2:2,top3:2},indices:{style:'差し'}},
+  {h:{number:3},pWin:.18,pTop2:.41,pTop3:.64,prob:.18,odds:7,ev:1.26,roleRanks:{win:3,top2:3,top3:3},indices:{style:'先行'}}
+ ];rows.simulation={quinella:{'1-2':.22,'1-3':.16,'2-3':.13},wide:{'1-2':.48,'1-3':.42,'2-3':.36},trio:{'1-2-3':.25},orders:{}};
+ const c=C.predictChaos(rows,{});if(!['荒','中','堅'].includes(c.label))throw Error('v1.16 chaos');
+ const rec=C.ticketRecommendations(rows,{quinella:{'1-2':7,'1-3':9,'2-3':12},wide:{'1-2':2.5,'1-3':3,'2-3':4},trio:{'1-2-3':15}},{'単勝':1.12,'馬複':1.28,'ワイド':1.22});
+ if(rec.trio.length)throw Error('v1.16 trio enabled');if(!rec.single.length||!rec.quinella.length||!rec.wide.length)throw Error('v1.16 active types');
+ console.log('v1.16 three types/chaos: OK',c.label)
+}
+{
+ const h=[];for(let i=0;i<40;i++)h.push({market:'central',surface:'芝',distance:1600,chaosLabel:'中',result:{first:1,second:2,third:3},aiTickets:[{type:'単勝',key:'1',numbers:[1],ev:1.25,prob:.18}],officialPayouts:{'単勝|1':i%4===0?500:0}});
+ const g=C.empiricalTicketGate(h,'単勝',{context:{market:'中央',surf:'芝',dist:'1300～1600m',chaos:'中'},ev:1.3,prob:.18});if(g.historyRows<30||!Number.isFinite(g.evReq))throw Error('v1.16 gate');console.log('v1.16 empirical gate: OK',g.evReq,g.weightedRoi)
 }
