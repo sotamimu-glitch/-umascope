@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.16",
+  "name": "UmaScope Free AutoBet 1.16.1",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "単勝・馬連・ワイドに絞り、実績ベース購入フィルターと荒れ度予測（荒・中・堅）を追加した競馬分析PWA"
+  "description": "1.16の予測ロジックを維持し、成績画面から購入候補ありの実際の買い目を確認できる表示を追加した競馬分析PWA"
 }
