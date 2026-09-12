@@ -334,3 +334,48 @@ console.log('v1.9 tests: ALL OK');
   if(C.ACTIVE_TYPES_117.join(',')!=='単勝,複勝,馬複,ワイド')throw Error('v1.17 active types');
   console.log('v1.17 active types: OK');
 }
+
+
+// v1.18 condition ROI ranking regression
+{
+  const h=[];
+  for(let i=0;i<30;i++){
+    const hit=i%5===0;
+    h.push({
+      modelVersion:'1.17-single-place-main',market:'central',surface:'芝',distance:1600,chaosLabel:'堅',
+      result:{first:hit?1:2,second:hit?2:3,third:hit?3:4},
+      aiTickets:[{type:'単勝',key:'1',numbers:[1],odds:6,prob:.20,ev:1.20}],
+      officialPayouts:hit?{'単勝|1':1200}:{}
+    })
+  }
+  const r=C.conditionRoiRanking(h,'単勝',{prefix:'1.17',source:'all',minTickets:10,priorTickets:20});
+  if(r.totalExactTickets!==30)throw Error('v1.18 exact ticket rows '+JSON.stringify(r));
+  const market=r.ranking.find(x=>x.dimension==='市場'&&x.label==='中央');
+  if(!market||market.n!==30||Math.abs(market.roi-2.4)>1e-9)throw Error('v1.18 market ROI '+JSON.stringify(market));
+  if(!market.candidate200)throw Error('v1.18 200 candidate should qualify '+JSON.stringify(market));
+  console.log('v1.18 condition ROI ranking: OK');
+}
+{
+  const h=[];
+  for(let i=0;i<10;i++){
+    const hit=i===0;
+    h.push({
+      modelVersion:'1.17-single-place-main',market:'local',surface:'ダ',distance:1200,chaosLabel:'荒',
+      result:{first:hit?5:1,second:2,third:3},
+      aiTickets:[{type:'複勝',key:'5',numbers:[5],odds:3.0,prob:.45,ev:1.35}],
+      officialPayouts:hit?{'複勝|5':3000}:{}
+    })
+  }
+  const r=C.conditionRoiRanking(h,'複勝',{prefix:'1.17',source:'all',minTickets:10,priorTickets:20});
+  const g=r.ranking.find(x=>x.dimension==='市場'&&x.label==='地方');
+  if(!g||Math.abs(g.roi-3.0)>1e-9)throw Error('v1.18 place ROI '+JSON.stringify(g));
+  if(g.candidate200)throw Error('v1.18 small sample must not be 200 candidate');
+  if(!(g.adjustedRoi<g.roi))throw Error('v1.18 shrinkage missing');
+  console.log('v1.18 sample shrinkage: OK');
+}
+{
+  if(C.roiOddsBand('単勝',4.2)!=='3.0～4.9倍')throw Error('v1.18 win odds band');
+  if(C.roiOddsBand('複勝',1.8)!=='1.5～1.9倍')throw Error('v1.18 place odds band');
+  if(C.roiProbBand('複勝',.64)!=='60～69%')throw Error('v1.18 place probability band');
+  console.log('v1.18 condition bands: OK');
+}
