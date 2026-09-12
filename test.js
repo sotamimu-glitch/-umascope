@@ -282,3 +282,55 @@ console.log('v1.9 tests: ALL OK');
  const h=[];for(let i=0;i<40;i++)h.push({market:'central',surface:'芝',distance:1600,chaosLabel:'中',result:{first:1,second:2,third:3},aiTickets:[{type:'単勝',key:'1',numbers:[1],ev:1.25,prob:.18}],officialPayouts:{'単勝|1':i%4===0?500:0}});
  const g=C.empiricalTicketGate(h,'単勝',{context:{market:'中央',surf:'芝',dist:'1300～1600m',chaos:'中'},ev:1.3,prob:.18});if(g.historyRows<30||!Number.isFinite(g.evReq))throw Error('v1.16 gate');console.log('v1.16 empirical gate: OK',g.evReq,g.weightedRoi)
 }
+
+
+// v1.17 place-bet + daily stats regression
+{
+  const r={first:3,second:7,third:5};
+  if(!C.ticketGrade({type:'複勝',key:'3',numbers:[3]},r))throw Error('v1.17 place first');
+  if(!C.ticketGrade({type:'複勝',key:'7',numbers:[7]},r))throw Error('v1.17 place second');
+  if(!C.ticketGrade({type:'複勝',key:'5',numbers:[5]},r))throw Error('v1.17 place third');
+  if(C.ticketGrade({type:'複勝',key:'4',numbers:[4]},r))throw Error('v1.17 place miss');
+  console.log('v1.17 place grading: OK');
+}
+{
+  const x={
+    tickets:[{type:'複勝',key:'5',numbers:[5],prob:.62,odds:1.8,ev:1.116}],
+    aiTickets:[{type:'複勝',key:'5',numbers:[5],prob:.62,odds:1.8,ev:1.116}],
+    result:{first:3,second:7,third:5},
+    officialPayouts:{'複勝|5':180}
+  };
+  const s=C.exactRaceStats(x,'purchase');
+  if(!s.complete||s.hits!==1||s.stake!==100||s.payout!==180||Math.abs(s.roi-1.8)>1e-9)throw Error('v1.17 place exact ROI '+JSON.stringify(s));
+  console.log('v1.17 place official payout: OK');
+}
+{
+  const p=C.parseOfficialPayoutText('複勝:5=210, 単勝:3=430');
+  if(p['複勝|5']!==210||p['単勝|3']!==430)throw Error('v1.17 payout parser '+JSON.stringify(p));
+  console.log('v1.17 place payout parser: OK');
+}
+{
+  const rows=[
+    {h:{number:1,placeOdds:1.6},roleRanks:{win:1,top2:1,top3:1},pWin:.32,pTop2:.58,pTop3:.78,prob:.32,odds:3.8,ev:1.216},
+    {h:{number:2,placeOdds:2.0},roleRanks:{win:2,top2:2,top3:2},pWin:.22,pTop2:.48,pTop3:.65,prob:.22,odds:5.5,ev:1.21},
+    {h:{number:3,placeOdds:2.5},roleRanks:{win:3,top2:3,top3:3},pWin:.16,pTop2:.37,pTop3:.51,prob:.16,odds:8,ev:1.28}
+  ];
+  const rec=C.ticketRecommendations(rows,{quinella:{'1-2':8,'1-3':13,'2-3':16},wide:{'1-2':2.7,'1-3':3.8,'2-3':4.5}},{'単勝':1.12,'複勝':1.10,'馬複':1.36,'ワイド':1.30});
+  if(!rec.place?.length||rec.place[0].type!=='複勝')throw Error('v1.17 place recommendation '+JSON.stringify(rec));
+  console.log('v1.17 single/place recommendations: OK');
+}
+{
+  const h=[
+    {date:'2026-09-10',tickets:[{type:'単勝',key:'1',numbers:[1]}],aiTickets:[{type:'単勝',key:'1',numbers:[1]}],result:{first:1,second:2,third:3},officialPayouts:{'単勝|1':250}},
+    {date:'2026-09-10',tickets:[{type:'複勝',key:'4',numbers:[4]}],aiTickets:[{type:'複勝',key:'4',numbers:[4]}],result:{first:5,second:4,third:2},officialPayouts:{'複勝|4':170}},
+    {date:'2026-09-11',tickets:[{type:'単勝',key:'2',numbers:[2]}],aiTickets:[{type:'単勝',key:'2',numbers:[2]}],result:{first:1,second:2,third:3},officialPayouts:{}}
+  ];
+  const d=C.dailyExactStats(h,'purchase');
+  if(d.length!==2||d[0].date!=='2026-09-11'||d[1].date!=='2026-09-10')throw Error('v1.17 daily order '+JSON.stringify(d));
+  if(Math.abs(d[1].roi-2.1)>1e-9||Math.abs(d[1].hitRate-1)>1e-9)throw Error('v1.17 daily stats '+JSON.stringify(d[1]));
+  console.log('v1.17 daily exact stats: OK');
+}
+{
+  if(C.ACTIVE_TYPES_117.join(',')!=='単勝,複勝,馬複,ワイド')throw Error('v1.17 active types');
+  console.log('v1.17 active types: OK');
+}

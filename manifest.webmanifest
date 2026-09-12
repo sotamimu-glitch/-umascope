@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.16.1",
+  "name": "UmaScope Free AutoBet 1.17",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "1.16の予測ロジックを維持し、成績画面から購入候補ありの実際の買い目を確認できる表示を追加した競馬分析PWA"
+  "description": "単勝・複勝を主力、馬連・ワイドを補助にし、日ごとの的中率・公式払戻回収率を表示する競馬分析PWA"
 }
