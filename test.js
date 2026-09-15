@@ -379,3 +379,48 @@ console.log('v1.9 tests: ALL OK');
   if(C.roiProbBand('複勝',.64)!=='60～69%')throw Error('v1.18 place probability band');
   console.log('v1.18 condition bands: OK');
 }
+
+
+// v1.19 prediction-accuracy regression
+{
+  const weak={finish:3,field:10,pop:3,classLevel:3};
+  const strong={finish:3,field:16,pop:3,classLevel:9};
+  if(!(C.raceLevelOne(strong)>C.raceLevelOne(weak)))throw Error('v1.19 race level ordering');
+  if(!(C.strengthAdjustedPerformance(strong)>C.strengthAdjustedPerformance(weak)))throw Error('v1.19 strength adjustment');
+  console.log('v1.19 race-level adjustment: OK');
+}
+{
+  const hist=[
+    {date:'2026-09-15',course:'東京',surface:'芝',raceNo:1,result:{first:1,second:2,third:3},runnerBiasPacked:[[1,1,1],[2,2,2],[3,3,2],[4,8,4]]},
+    {date:'2026-09-15',course:'東京',surface:'芝',raceNo:2,result:{first:5,second:6,third:7},runnerBiasPacked:[[5,2,1],[6,1,2],[7,3,2],[8,8,4]]},
+    {date:'2026-09-15',course:'東京',surface:'芝',raceNo:8,result:{first:9,second:10,third:11},runnerBiasPacked:[[9,8,4],[10,7,4],[11,6,3]]}
+  ];
+  const b=C.sameDayTrackBias(hist,{date:'2026-09-15',courseName:'東京',surface:'芝',raceNo:5});
+  if(!b.enough||b.races!==2||!(b.style>0)||!(b.frame>0))throw Error('v1.19 same-day bias '+JSON.stringify(b));
+  console.log('v1.19 same-day track bias: OK',b.label);
+}
+{
+  const samples=[];
+  for(let i=0;i<200;i++)samples.push({p:.20,y:i<60?1:0,surface:'芝',distanceBand:'1300～1600m',course:'東京'});
+  const c=C.calibrationContext(samples,{surface:'芝',distance:1600,courseName:'東京'});
+  if(c.samples.length!==200||c.level!==2)throw Error('v1.19 calibration context '+JSON.stringify(c));
+  const z=C.calibrateContextOne(.20,samples,c.samples);
+  if(!(z>.20&&z<.31))throw Error('v1.19 contextual calibration '+z);
+  console.log('v1.19 contextual calibration: OK',z);
+}
+{
+  const race={
+    type:'central',date:'2026-09-15',courseName:'東京',raceNo:10,surface:'芝',distance:1600,going:'良',
+    horses:[
+      {number:1,frame:1,name:'A',jockey:'騎手A',weight:56,odds:2,recent:[{finish:1,field:12,pop:1,classLevel:5,distance:1600,surface:'芝',going:'良',corners:[2,2,1,1]}]},
+      {number:2,frame:8,name:'B',jockey:'騎手B',weight:56,odds:20,recent:[{finish:2,field:12,pop:2,classLevel:5,distance:1600,surface:'芝',going:'良',corners:[8,7,5,2]}]},
+      {number:3,frame:4,name:'C',jockey:'騎手C',weight:56,odds:8,recent:[{finish:3,field:12,pop:3,classLevel:5,distance:1600,surface:'芝',going:'良',corners:[5,5,4,3]}]}
+    ]
+  };
+  const r1=JSON.parse(JSON.stringify(race)),r2=JSON.parse(JSON.stringify(race));
+  r2.horses[0].odds=100;r2.horses[1].odds=1.1;r2.horses[2].odds=50;
+  const a=C.rank(r1,{history:[]}),b=C.rank(r2,{history:[]});
+  const pa=Object.fromEntries(a.map(x=>[x.h.number,x.pWin])),pb=Object.fromEntries(b.map(x=>[x.h.number,x.pWin]));
+  for(const no of [1,2,3])if(Math.abs(pa[no]-pb[no])>1e-12)throw Error('v1.19 odds leaked into probability');
+  console.log('v1.19 odds-independent probabilities: OK');
+}

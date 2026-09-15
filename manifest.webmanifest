@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.18",
+  "name": "UmaScope Free AutoBet 1.19",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "1.17の単複予測ロジックを維持し、公式払戻ベースの単勝・複勝条件別ROIランキングを追加した競馬分析PWA"
+  "description": "同日馬場バイアス、過去レースレベル補正、中央地方・芝ダ・距離帯の文脈別確率校正でオッズ前予測を強化した競馬分析PWA"
 }

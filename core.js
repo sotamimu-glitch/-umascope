@@ -1478,9 +1478,309 @@ function conditionRoiRanking(history,type,opts={}){
     ranking:ranked
   }
 }
+
+// ============================================================
+// v1.19 — prediction accuracy upgrade
+// 1) same-day track bias
+// 2) past-race level adjustment
+// 3) contextual probability calibration
+// Betting / ROI discovery logic remains v1.18.
+// ============================================================
+
+function raceLevelOne(x){
+  if(!x)return 5;
+  const cls=Number(x.classLevel);
+  let base=Number.isFinite(cls)?3+clamp((cls-2.5)/7.5,0,1)*6:5;
+  const field=Number(x.field);
+  if(Number.isFinite(field))base+=clamp((field-10)*.07,-.45,.65);
+  return clamp(base,2.5,9.5)
+}
+function strengthAdjustedPerformance(x){
+  const p=Number(racePerformance(x));if(!Number.isFinite(p))return null;
+  const lv=raceLevelOne(x);
+  return clamp(p+(lv-5)*.38,1,10)
+}
+function raceLevelProfile(h){
+  const xs=(h?.recent||[]).slice(0,8),vals=[];
+  for(let i=0;i<xs.length;i++){
+    const lv=raceLevelOne(xs[i]);
+    vals.push({v:lv,w:Math.pow(.84,i)})
+  }
+  const avg=weightedCustom(vals);
+  return {avg:avg==null?5:avg,samples:xs.length,score:to100(avg==null?5:avg)}
+}
+function sixIndices(h,r){
+  const f=rawFeatures(h,r),
+        level=raceLevelProfile(h),
+        adjPerf=weighted(f.recent.slice(0,6).map(strengthAdjustedPerformance))??5,
+        ability=to100(weightedCustom([
+          {v:adjPerf,w:.36},
+          {v:f.margin,w:.19},
+          {v:f.field,w:.13},
+          {v:f.popularity,w:.12},
+          {v:level.avg,w:.12},
+          {v:f.classChange,w:.08}
+        ])),
+        suitability=to100(weightedCustom([
+          {v:f.distance,w:.22},{v:f.surface,w:.18},{v:f.going,w:.16},
+          {v:f.courseDistance.score,w:.20},{v:f.sameCourse.score,w:.11},
+          {v:f.distRecord,w:.08},{v:f.frame,w:.05}
+        ])),
+        pace=paceIndex(h,r),
+        jockey=to100(f.jockey),
+        recent2=weighted(f.recent.slice(0,2).map(strengthAdjustedPerformance))??5,
+        form=to100(weightedCustom([
+          {v:f.trend,w:.31},{v:recent2,w:.28},{v:f.weight,w:.12},
+          {v:f.layoff,w:.12},{v:f.bodyScore,w:.07},{v:f.margin,w:.10}
+        ]));
+  const details={
+    ability:`相手レベル補正 ${level.samples}走 / 平均LV ${level.avg.toFixed(1)} ＋ 着差・着順・人気`,
+    suitability:`コース×距離${f.courseDistance.n}走 / 同場${f.sameCourse.n}走を縮小推定`,
+    pace:`${pace.detail} / 脚質 ${pace.style}`,
+    jockey:f.sameJ?`今回騎手との近走 ${f.sameJ}走を縮小評価`:(h.jockey?'同騎手データが少なく中立寄り':'騎手情報不足'),
+    form:`近走推移＋レースLV補正直近内容 / ${f.layDays!=null?`前走から${f.layDays}日`:'間隔不明'} / ${f.bodyDetail}`,
+    value:'予測確率とは分離。オッズ取得後だけEV計算'
+  };
+  const observed=[
+    f.evidence>=2,!!(r.distance&&f.latest?.distance),!!r.surface,
+    !!(r.going&&f.recent.some(x=>x.going)),f.sameJ>0,
+    styleProfile(h).samples>=2,Number.isFinite(Number(h.weight)),
+    f.courseDistance.n>0,f.latest?.classLevel!=null,level.samples>=3
+  ].filter(Boolean).length;
+  const confidence=clamp(.18+.062*observed+.018*Math.min(f.evidence,8),.22,.94);
+  return {
+    ability,suitability,pace:pace.score,jockey,form,value:50,
+    confidence,evidence:f.evidence,style:pace.style,raceLevel:+level.avg.toFixed(2),
+    details,raw:f
+  }
+}
+
+function biasStyleValue(label){
+  return label==='逃げ'?1:label==='先行'?.58:label==='差し'?-.42:label==='追込'?-.88:0
+}
+function biasFrameValue(frame){
+  const f=Number(frame);if(!Number.isFinite(f)||f<1)return 0;
+  return clamp(1-(f-1)/7*2,-1,1)
+}
+function biasStyleCode(label){return label==='逃げ'?1:label==='先行'?2:label==='差し'?3:label==='追込'?4:0}
+function biasStyleFromCode(code){return Number(code)===1?'逃げ':Number(code)===2?'先行':Number(code)===3?'差し':Number(code)===4?'追込':'不明'}
+function unpackBiasRows(x){
+  if(!Array.isArray(x?.runnerBiasPacked))return [];
+  return x.runnerBiasPacked.map(a=>({number:Number(a[0]),frame:Number(a[1])||null,style:biasStyleFromCode(a[2])}))
+}
+function sameDayTrackBias(history,r){
+  const date=String(r?.date||'').slice(0,10),
+        course=String(r?.courseName||r?.course||'').replace(/^Ｊ/,''),
+        surface=r?.surface||'',
+        currentNo=Number(r?.raceNo)||99;
+  const races=[];
+  for(const x of history||[]){
+    const res=historyResult(x),xn=Number(x.raceNo)||0;
+    if(!res.first||!date||String(x.date||'').slice(0,10)!==date)continue;
+    if(String(x.course||'').replace(/^Ｊ/,'')!==course)continue;
+    if(surface&&x.surface&&x.surface!==surface)continue;
+    if(xn>=currentNo)continue;
+    const rows=unpackBiasRows(x);if(!rows.length)continue;
+    const map=new Map(rows.map(z=>[Number(z.number),z])),
+          order=[res.first,res.second,res.third].filter(Boolean),
+          weights=[1,.72,.52];
+    let style=0,frame=0,w=0,used=0;
+    order.forEach((no,i)=>{
+      const z=map.get(Number(no));if(!z)return;
+      const ww=weights[i]||.5;
+      style+=biasStyleValue(z.style)*ww;
+      frame+=biasFrameValue(z.frame)*ww;
+      w+=ww;used++
+    });
+    if(used)races.push({style:w?style/w:0,frame:w?frame/w:0,used})
+  }
+  if(races.length<2)return {enough:false,races:races.length,style:0,frame:0,label:'データ不足',strength:0};
+  const recent=races.slice(-6),decay=recent.map((_,i)=>Math.pow(.86,recent.length-1-i)),
+        den=decay.reduce((a,b)=>a+b,0)||1;
+  const style=recent.reduce((s,z,i)=>s+z.style*decay[i],0)/den,
+        frame=recent.reduce((s,z,i)=>s+z.frame*decay[i],0)/den,
+        strength=clamp(recent.length/5,.40,1);
+  const parts=[];
+  if(style>.24)parts.push('前有利'); else if(style<-.24)parts.push('差し有利');
+  if(frame>.22)parts.push('内有利'); else if(frame<-.22)parts.push('外有利');
+  return {
+    enough:true,races:recent.length,
+    style:+style.toFixed(3),frame:+frame.toFixed(3),
+    strength:+strength.toFixed(2),
+    label:parts.length?parts.join('・'):'中立'
+  }
+}
+function trackBiasAdjustment(h,bias){
+  if(!bias?.enough)return 0;
+  const st=styleProfile(h),sv=biasStyleValue(st.label),fv=biasFrameValue(h?.frame);
+  return clamp((bias.style*sv*3.0+bias.frame*fv*2.0)*bias.strength,-3.2,3.2)
+}
+function roleScoreForRow(x,role,w,r,relative){
+  const abs=Object.entries(normalizeWeights(w)).reduce((s,[k,v])=>s+(Number(x.indices?.[k])||50)*v,0);
+  const rel=Object.entries(normalizeWeights(w)).reduce((s,[k,v])=>s+(Number(relative?.[x.h.number]?.[k])||50)*v,0);
+  let score=.55*abs+.45*rel;
+  const st=styleProfile(x.h),cons=finishConsistency(x.h),archiveSig=archiveConditionSignal(x.h,r),
+        biasAdj=trackBiasAdjustment(x.h,r?.sameDayBias),
+        roleBias=role==='win'?.95:role==='top2'?1:.85;
+  score+=biasAdj*roleBias;
+  if(role==='win'){
+    score+=(Number(x.indices.ability)-50)*.035+(Number(x.indices.form)-50)*.025+archiveSig*.28;
+    if(st.gain!=null&&st.gain>.10)score+=Math.min(3,st.gain*12)
+  }else if(role==='top2'){
+    score+=(cons.score-50)*.055+(Number(x.indices.suitability)-50)*.018+archiveSig*.45
+  }else{
+    score+=(cons.score-50)*.085+(Number(x.indices.suitability)-50)*.030+archiveSig*.62;
+    if(st.early!=null&&st.early<=.42)score+=1.2
+  }
+  return score
+}
+
+function calibrationSamples(history,market,target='pWin'){
+  const out=[];
+  for(const x of forecastEntries(history,market)){
+    const r=historyResult(x),top2=new Set([r.first,r.second]),top3=new Set([r.first,r.second,r.third]);
+    for(const z of x.aiForecast||[]){
+      const p=Number(z[target]);if(!Number.isFinite(p))continue;
+      let y=0;
+      if(target==='pWin')y=Number(z.number)===Number(r.first)?1:0;
+      else if(target==='pTop2')y=top2.has(Number(z.number))?1:0;
+      else y=top3.has(Number(z.number))?1:0;
+      out.push({
+        p,y,surface:x.surface||'',distanceBand:distanceBand(x.distance),
+        going:x.going||'',course:String(x.course||'').replace(/^Ｊ/,'')
+      })
+    }
+  }
+  return out
+}
+function calibrationContext(samples,r){
+  const surf=r?.surface||'',db=distanceBand(r?.distance),course=String(r?.courseName||'').replace(/^Ｊ/,'');
+  let a=samples.filter(x=>x.surface===surf&&x.distanceBand===db);
+  if(a.length>=120)return {samples:a,label:`${surf}×${db}`,level:2};
+  a=samples.filter(x=>x.surface===surf);
+  if(a.length>=120)return {samples:a,label:`${surf}`,level:1};
+  a=samples.filter(x=>x.course===course);
+  if(a.length>=120)return {samples:a,label:`${course}`,level:1};
+  return {samples:[],label:'全体',level:0}
+}
+function probabilityBin(p){
+  const edges=[0,.04,.08,.12,.18,.25,.35,.50,.70,1.01];
+  for(let i=0;i<edges.length-1;i++)if(p>=edges[i]&&p<edges[i+1])return [edges[i],edges[i+1]];
+  return [0,1.01]
+}
+function calibrateContextOne(p,globalSamples,ctxSamples){
+  p=clamp(Number(p)||0,0,1);
+  const global=calibrateOne(p,globalSamples);
+  if(!ctxSamples||ctxSamples.length<120)return global;
+  const [lo,hi]=probabilityBin(p),bin=ctxSamples.filter(x=>x.p>=lo&&x.p<hi);
+  if(bin.length<20)return global;
+  const hits=bin.reduce((s,x)=>s+x.y,0),priorN=45,
+        post=(hits+priorN*global)/(bin.length+priorN),
+        blend=clamp(bin.length/110,0,.45);
+  return clamp(global*(1-blend)+post*blend,.001,.999)
+}
+
+function rank(r,opts={}){
+  const history=opts.history||[],market=r.type||'central',
+        bias=sameDayTrackBias(history,r);
+  r.sameDayBias=bias;
+
+  const rwWin=roleWeightWalkForward(history,market,'win'),
+        rw2=roleWeightWalkForward(history,market,'top2'),
+        rw3=roleWeightWalkForward(history,market,'top3');
+
+  let rows=r.horses.map(h=>{
+    const indices=sixIndices(h,r),score=modelScore(indices,BASE_MODEL_WEIGHTS_112);
+    return {h,auto:indices,indices,score,grade:overallGrade(score),odds:h.odds||null}
+  });
+
+  const relWin=relativeIndexScores(rows,rwWin.weights),
+        rel2=relativeIndexScores(rows,rw2.weights),
+        rel3=relativeIndexScores(rows,rw3.weights),
+        sWin={},s2={},s3={};
+
+  for(const x of rows){
+    sWin[x.h.number]=roleScoreForRow(x,'win',rwWin.weights,r,relWin);
+    s2[x.h.number]=roleScoreForRow(x,'top2',rw2.weights,r,rel2);
+    s3[x.h.number]=roleScoreForRow(x,'top3',rw3.weights,r,rel3)
+  }
+
+  let b1=roleSoftmax(rows,sWin,1,7.8),
+      b2=roleSoftmax(rows,s2,2,9.2),
+      b3=roleSoftmax(rows,s3,3,10.2);
+
+  rows.forEach((x,i)=>{
+    x.roleBaseWin=b1[i];x.roleBaseTop2=b2[i];x.roleBaseTop3=b3[i];
+    x.roleScores={win:sWin[x.h.number],top2:s2[x.h.number],top3:s3[x.h.number]};
+    x.trackBiasAdjustment=trackBiasAdjustment(x.h,bias)
+  });
+
+  const seed=hashSeed([r.date,r.courseName,r.raceNo,r.name,'v119'].join('|')),
+        sim=simulateRaceRole(rows,SIMULATIONS_112,seed),
+        cal1=calibrationSamples(history,market,'pWin'),
+        cal2=calibrationSamples(history,market,'pTop2'),
+        cal3=calibrationSamples(history,market,'pTop3'),
+        cx1=calibrationContext(cal1,r),cx2=calibrationContext(cal2,r),cx3=calibrationContext(cal3,r);
+
+  let p1=rows.map(x=>sim.win[x.h.number]||0).map(p=>calibrateContextOne(p,cal1,cx1.samples)),
+      p2=rows.map(x=>sim.top2[x.h.number]||0).map(p=>calibrateContextOne(p,cal2,cx2.samples)),
+      p3=rows.map(x=>sim.top3[x.h.number]||0).map(p=>calibrateContextOne(p,cal3,cx3.samples));
+
+  ({p1,p2,p3}=enforceMarginals(p1,p2,p3,rows.length));
+
+  rows=rows.map((x,i)=>{
+    const ev=x.odds?p1[i]*x.odds:null;
+    return {...x,prob:p1[i],pWin:p1[i],pTop2:p2[i],pTop3:p3[i],ev,indices:{...x.indices,value:valueIndex(ev)}}
+  });
+
+  const winOrder=rows.slice().sort((a,b)=>b.pWin-a.pWin),
+        twoOrder=rows.slice().sort((a,b)=>b.pTop2-a.pTop2),
+        threeOrder=rows.slice().sort((a,b)=>b.pTop3-a.pTop3),
+        wr=new Map(winOrder.map((x,i)=>[x.h.number,i+1])),
+        r2=new Map(twoOrder.map((x,i)=>[x.h.number,i+1])),
+        r3=new Map(threeOrder.map((x,i)=>[x.h.number,i+1]));
+
+  rows=rows.map(x=>({...x,roleRanks:{win:wr.get(x.h.number),top2:r2.get(x.h.number),top3:r3.get(x.h.number)}}));
+
+  const adjMap=(obj,target,rawTarget,size)=>{
+    const out={};
+    for(const [k,p] of Object.entries(obj)){
+      const ns=k.split('-').map(Number);let f=1;
+      for(const no of ns){
+        const i=rows.findIndex(x=>x.h.number===no),
+              den=Math.max(1e-6,rawTarget[no]||0),
+              num=Math.max(1e-6,target[i]||0);
+        f*=num/den
+      }
+      out[k]=clamp(p*Math.pow(f,1/size),0,1)
+    }
+    return out
+  };
+  sim.quinella=adjMap(sim.quinella,p2,sim.top2,2);
+  sim.wide=adjMap(sim.wide,p3,sim.top3,2);
+  sim.trio=adjMap(sim.trio,p3,sim.top3,3);
+
+  rows.simulation=sim;
+  rows.roleOrders={win:winOrder.map(x=>x.h.number),top2:twoOrder.map(x=>x.h.number),top3:threeOrder.map(x=>x.h.number)};
+  rows.modelMeta={
+    simulations:SIMULATIONS_112,market,
+    roleWeights:{win:rwWin.weights,top2:rw2.weights,top3:rw3.weights},
+    roleWalkForward:{win:rwWin,top2:rw2,top3:rw3},
+    calibrationSamples:{win:cal1.length,top2:cal2.length,top3:cal3.length},
+    calibrationContext:{
+      win:{label:cx1.label,samples:cx1.samples.length},
+      top2:{label:cx2.label,samples:cx2.samples.length},
+      top3:{label:cx3.label,samples:cx3.samples.length}
+    },
+    sameDayBias:bias,
+    averageRaceLevel:rows.length?rows.reduce((s,x)=>s+(Number(x.indices.raceLevel)||5),0)/rows.length:5,
+    oddsUsedForProbability:false
+  };
+  return rows.sort((a,b)=>a.roleRanks.win-b.roleRanks.win)
+}
 function parse(raw){
   const p=parsePayload(raw),r=parseNAR(p)||parseJRA(p);
   if(r)r.classLevel=classLevelFromText([r.name,p.title,p.text,p.jraText,p.narDetailText].filter(Boolean).join(' '),r.type);
   return r
 }
-const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationStatus,learnTicketThresholds,rankingDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parsePlaceOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ACTIVE_TYPES_116,ACTIVE_TYPES_117,raceChaosFeatures,predictChaos,empiricalTicketGate,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,dailyExactStats,exactTicketRows,conditionRoiRanking,roiOddsBand,roiProbBand,roiEvBand,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
+const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,raceLevelOne,strengthAdjustedPerformance,raceLevelProfile,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationContext,calibrateContextOne,calibrationStatus,learnTicketThresholds,sameDayTrackBias,trackBiasAdjustment,biasStyleCode,rankingDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parsePlaceOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ACTIVE_TYPES_116,ACTIVE_TYPES_117,raceChaosFeatures,predictChaos,empiricalTicketGate,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,dailyExactStats,exactTicketRows,conditionRoiRanking,roiOddsBand,roiProbBand,roiEvBand,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
