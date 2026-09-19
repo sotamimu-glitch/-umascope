@@ -1778,9 +1778,76 @@ function rank(r,opts={}){
   };
   return rows.sort((a,b)=>a.roleRanks.win-b.roleRanks.win)
 }
+
+// ============================================================
+// v1.19.1 — v1.19 effect diagnostics only
+// Prediction / ticket selection logic is unchanged from v1.19.
+// ============================================================
+function effectGroupStats(entries,label=''){
+  const a=entries||[],rank=rankingDiagnostics(a),
+        win=exactStats(a,'all','単勝'),
+        place=exactStats(a,'all','複勝'),
+        purchase=exactStats(a,'purchase');
+  return {
+    label,races:a.filter(x=>historyResult(x).first!=null).length,
+    top1:rank.top1Win,top3:rank.top3Winner,
+    winRoi:win.roi,winTickets:win.completeTickets,
+    placeRoi:place.roi,placeTickets:place.completeTickets,
+    purchaseRoi:purchase.roi,purchaseRaces:purchase.completeRaces,
+    purchaseHit:purchase.raceRate
+  }
+}
+function v119EffectDiagnostics(history){
+  const src=(history||[]).filter(x=>String(x.modelVersion||'').startsWith('1.19')),
+        biasOn=src.filter(x=>x.biasAtPrediction?.enough),
+        biasOff=src.filter(x=>!x.biasAtPrediction?.enough);
+
+  const labelMap=new Map();
+  for(const x of biasOn){
+    const k=x.biasAtPrediction?.label||'不明';
+    if(!labelMap.has(k))labelMap.set(k,[]);
+    labelMap.get(k).push(x)
+  }
+  const biasLabels=[...labelMap.entries()]
+    .map(([k,v])=>effectGroupStats(v,k))
+    .sort((a,b)=>b.races-a.races);
+
+  const central=src.filter(x=>(x.market||x.type)!=='local'),
+        local=src.filter(x=>(x.market||x.type)==='local');
+
+  const withAudit=src.filter(x=>x.audit1191),
+        levelHigh=withAudit.filter(x=>Number(x.audit1191?.top1LevelDelta)>=.5),
+        levelMid=withAudit.filter(x=>Math.abs(Number(x.audit1191?.top1LevelDelta)||0)<.5),
+        levelLow=withAudit.filter(x=>Number(x.audit1191?.top1LevelDelta)<=-.5),
+        context=withAudit.filter(x=>!!x.audit1191?.contextCalibrationUsed),
+        fallback=withAudit.filter(x=>!x.audit1191?.contextCalibrationUsed);
+
+  return {
+    total:src.length,
+    bias:{
+      on:effectGroupStats(biasOn,'バイアスON'),
+      off:effectGroupStats(biasOff,'バイアスOFF'),
+      labels:biasLabels
+    },
+    market:{
+      central:effectGroupStats(central,'中央'),
+      local:effectGroupStats(local,'地方')
+    },
+    auditSamples:withAudit.length,
+    level:{
+      high:effectGroupStats(levelHigh,'AI1位が平均より高LV'),
+      mid:effectGroupStats(levelMid,'AI1位のLV差が小さい'),
+      low:effectGroupStats(levelLow,'AI1位が平均より低LV')
+    },
+    calibration:{
+      context:effectGroupStats(context,'文脈校正あり'),
+      fallback:effectGroupStats(fallback,'全体寄り校正')
+    }
+  }
+}
 function parse(raw){
   const p=parsePayload(raw),r=parseNAR(p)||parseJRA(p);
   if(r)r.classLevel=classLevelFromText([r.name,p.title,p.text,p.jraText,p.narDetailText].filter(Boolean).join(' '),r.type);
   return r
 }
-const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,raceLevelOne,strengthAdjustedPerformance,raceLevelProfile,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationContext,calibrateContextOne,calibrationStatus,learnTicketThresholds,sameDayTrackBias,trackBiasAdjustment,biasStyleCode,rankingDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parsePlaceOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ACTIVE_TYPES_116,ACTIVE_TYPES_117,raceChaosFeatures,predictChaos,empiricalTicketGate,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,dailyExactStats,exactTicketRows,conditionRoiRanking,roiOddsBand,roiProbBand,roiEvBand,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
+const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,raceLevelOne,strengthAdjustedPerformance,raceLevelProfile,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationContext,calibrateContextOne,calibrationStatus,learnTicketThresholds,sameDayTrackBias,trackBiasAdjustment,biasStyleCode,rankingDiagnostics,effectGroupStats,v119EffectDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parsePlaceOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ACTIVE_TYPES_116,ACTIVE_TYPES_117,raceChaosFeatures,predictChaos,empiricalTicketGate,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,dailyExactStats,exactTicketRows,conditionRoiRanking,roiOddsBand,roiProbBand,roiEvBand,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);

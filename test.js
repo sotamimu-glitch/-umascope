@@ -424,3 +424,47 @@ console.log('v1.9 tests: ALL OK');
   for(const no of [1,2,3])if(Math.abs(pa[no]-pb[no])>1e-12)throw Error('v1.19 odds leaked into probability');
   console.log('v1.19 odds-independent probabilities: OK');
 }
+
+
+// v1.19.1 effect diagnostics regression
+{
+  const h=[
+    {
+      modelVersion:'1.19-bias-level-calibration',market:'central',
+      biasAtPrediction:{enough:true,label:'前有利・内有利'},
+      aiTop3:[{number:1},{number:2},{number:3}],
+      aiTickets:[{type:'単勝',key:'1',numbers:[1]},{type:'複勝',key:'1',numbers:[1]}],
+      tickets:[{type:'単勝',key:'1',numbers:[1]}],
+      result:{first:1,second:4,third:5},
+      officialPayouts:{'単勝|1':300,'複勝|1':150}
+    },
+    {
+      modelVersion:'1.19-bias-level-calibration',market:'local',
+      biasAtPrediction:{enough:false,label:'データ不足'},
+      aiTop3:[{number:2},{number:3},{number:4}],
+      aiTickets:[{type:'単勝',key:'2',numbers:[2]},{type:'複勝',key:'2',numbers:[2]}],
+      tickets:[{type:'単勝',key:'2',numbers:[2]}],
+      result:{first:5,second:2,third:7},
+      officialPayouts:{'複勝|2':180}
+    }
+  ];
+  const d=C.v119EffectDiagnostics(h);
+  if(d.total!==2||d.bias.on.races!==1||d.bias.off.races!==1)throw Error('v1.19.1 bias groups '+JSON.stringify(d.bias));
+  if(Math.abs(d.bias.on.top1-1)>1e-9)throw Error('v1.19.1 top1');
+  if(Math.abs(d.bias.on.winRoi-3)>1e-9)throw Error('v1.19.1 win roi '+JSON.stringify(d.bias.on));
+  if(d.market.central.races!==1||d.market.local.races!==1)throw Error('v1.19.1 market groups');
+  console.log('v1.19.1 effect diagnostics: OK');
+}
+{
+  const h=[{
+    modelVersion:'1.19-bias-level-calibration',market:'central',
+    audit1191:{top1LevelDelta:.7,contextCalibrationUsed:true},
+    aiTop3:[{number:1},{number:2},{number:3}],
+    aiTickets:[{type:'単勝',key:'1',numbers:[1]}],
+    result:{first:1,second:2,third:3},
+    officialPayouts:{'単勝|1':250}
+  }];
+  const d=C.v119EffectDiagnostics(h);
+  if(d.auditSamples!==1||d.level.high.races!==1||d.calibration.context.races!==1)throw Error('v1.19.1 audit groups '+JSON.stringify(d));
+  console.log('v1.19.1 future audit metadata: OK');
+}

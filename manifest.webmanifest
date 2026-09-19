@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.19",
+  "name": "UmaScope Free AutoBet 1.19.1",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "同日馬場バイアス、過去レースレベル補正、中央地方・芝ダ・距離帯の文脈別確率校正でオッズ前予測を強化した競馬分析PWA"
+  "description": "1.19の予測ロジックを変えず、馬場バイアス・レースLV補正・文脈別確率校正の効果を分けて検証できる分析機能を追加"
 }
