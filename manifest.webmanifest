@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.19.1",
+  "name": "UmaScope Free AutoBet 1.19.2",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "1.19の予測ロジックを変えず、馬場バイアス・レースLV補正・文脈別確率校正の効果を分けて検証できる分析機能を追加"
+  "description": "1.19.1の予測ロジックを維持し、条件別ROIランキングの1.17以降・1.19以降・全期間の集計範囲を正しく修正"
 }

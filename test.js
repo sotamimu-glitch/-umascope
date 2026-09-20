@@ -468,3 +468,53 @@ console.log('v1.9 tests: ALL OK');
   if(d.auditSamples!==1||d.level.high.races!==1||d.calibration.context.races!==1)throw Error('v1.19.1 audit groups '+JSON.stringify(d));
   console.log('v1.19.1 future audit metadata: OK');
 }
+
+
+// v1.19.2 ROI scope regression
+{
+  if(!C.modelVersionAtLeast('1.19-bias-level-calibration','1.17'))throw Error('1.19 should be >= 1.17');
+  if(!C.modelVersionAtLeast('1.19-bias-level-calibration','1.19'))throw Error('1.19 should be >= 1.19');
+  if(C.modelVersionAtLeast('1.16-empirical-chaos','1.17'))throw Error('1.16 must be excluded from 1.17+');
+  console.log('v1.19.2 semantic version scope: OK');
+}
+{
+  const make=(modelVersion,no,payout)=>({
+    modelVersion,market:'central',surface:'芝',distance:1600,chaosLabel:'堅',
+    result:{first:no,second:9,third:8},
+    aiTickets:[{type:'単勝',key:String(no),numbers:[no],odds:2,prob:.30,ev:.60}],
+    officialPayouts:{['単勝|'+no]:payout}
+  });
+  const h=[
+    make('1.16-empirical-chaos',1,200),
+    make('1.17-single-place-main',2,210),
+    make('1.19-bias-level-calibration',3,220),
+    make('1.19-bias-level-calibration',4,230)
+  ];
+  const all=C.exactTicketRows(h,'単勝',{source:'all',minVersion:null});
+  const from117=C.exactTicketRows(h,'単勝',{source:'all',minVersion:'1.17'});
+  const from119=C.exactTicketRows(h,'単勝',{source:'all',minVersion:'1.19'});
+  if(all.length!==4)throw Error('all scope '+all.length);
+  if(from117.length!==3)throw Error('1.17+ must include 1.17 and 1.19: '+from117.length);
+  if(from119.length!==2)throw Error('1.19+ must include only 1.19+: '+from119.length);
+  console.log('v1.19.2 exact ticket scope: OK');
+}
+{
+  const h=[];
+  for(let i=0;i<10;i++)h.push({
+    modelVersion:'1.17-single-place-main',market:'central',surface:'芝',distance:1600,chaosLabel:'堅',
+    result:{first:1,second:2,third:3},
+    aiTickets:[{type:'単勝',key:'1',numbers:[1],odds:2,prob:.30,ev:.60}],
+    officialPayouts:{'単勝|1':200}
+  });
+  for(let i=0;i<10;i++)h.push({
+    modelVersion:'1.19-bias-level-calibration',market:'central',surface:'芝',distance:1600,chaosLabel:'堅',
+    result:{first:1,second:2,third:3},
+    aiTickets:[{type:'単勝',key:'1',numbers:[1],odds:2,prob:.30,ev:.60}],
+    officialPayouts:{'単勝|1':300}
+  });
+  const r117=C.conditionRoiRanking(h,'単勝',{source:'all',minVersion:'1.17',minTickets:10,priorTickets:20});
+  const r119=C.conditionRoiRanking(h,'単勝',{source:'all',minVersion:'1.19',minTickets:10,priorTickets:20});
+  if(r117.totalExactTickets!==20)throw Error('1.17+ ranking count '+r117.totalExactTickets);
+  if(r119.totalExactTickets!==10)throw Error('1.19+ ranking count '+r119.totalExactTickets);
+  console.log('v1.19.2 condition ranking scope: OK');
+}

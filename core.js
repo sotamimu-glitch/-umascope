@@ -1399,11 +1399,31 @@ function roiEvBand(ev){
   if(v<2.00)return '1.50～1.99';
   return '2.00～'
 }
+function modelVersionTuple(v){
+  const m=String(v||'').match(/^(\d+)\.(\d+)(?:\.(\d+))?/);
+  return m?[Number(m[1]),Number(m[2]),Number(m[3]||0)]:null
+}
+function modelVersionAtLeast(v,minVersion){
+  if(!minVersion)return true;
+  const a=modelVersionTuple(v),b=modelVersionTuple(minVersion);
+  if(!a||!b)return false;
+  for(let i=0;i<3;i++){
+    if(a[i]>b[i])return true;
+    if(a[i]<b[i])return false
+  }
+  return true
+}
 function exactTicketRows(history,type,opts={}){
   type=canonType(type);
-  const source=opts.source==='purchase'?'purchase':'all',prefix=opts.prefix||null,out=[];
+  const source=opts.source==='purchase'?'purchase':'all',
+        prefix=opts.prefix||null,
+        minVersion=opts.minVersion||null,
+        out=[];
   for(const x of history||[]){
-    if(prefix&&!String(x.modelVersion||'').startsWith(prefix))continue;
+    const mv=String(x.modelVersion||'');
+    if(minVersion){
+      if(!modelVersionAtLeast(mv,minVersion))continue
+    }else if(prefix&&!mv.startsWith(prefix))continue;
     // Only use races whose official payout is complete for this ticket type.
     const rs=exactRaceStats(x,source,type);if(!rs.complete)continue;
     const result=historyResult(x),tickets=(source==='purchase'?historyTickets(x):allSuggestedTickets(x)).filter(t=>canonType(t.type)===type);
@@ -1435,8 +1455,9 @@ function conditionRoiRanking(history,type,opts={}){
   const minTickets=Math.max(5,Number(opts.minTickets)||10),
         priorTickets=Math.max(0,Number(opts.priorTickets)||20),
         source=opts.source==='purchase'?'purchase':'all',
-        prefix=opts.prefix===undefined?'1.17':opts.prefix,
-        rows=exactTicketRows(history,type,{source,prefix}),
+        minVersion=opts.minVersion===undefined?'1.17':opts.minVersion,
+        prefix=opts.prefix||null,
+        rows=exactTicketRows(history,type,{source,minVersion,prefix}),
         groups=new Map();
 
   const add=(dimension,label,row)=>{
@@ -1473,7 +1494,7 @@ function conditionRoiRanking(history,type,opts={}){
   }).sort((a,b)=>b.adjustedRoi-a.adjustedRoi||b.n-a.n);
 
   return {
-    type,source,prefix,totalExactTickets:rows.length,minTickets,priorTickets,
+    type,source,prefix,minVersion,totalExactTickets:rows.length,minTickets,priorTickets,
     candidates200:ranked.filter(x=>x.candidate200),
     ranking:ranked
   }
@@ -1850,4 +1871,4 @@ function parse(raw){
   if(r)r.classLevel=classLevelFromText([r.name,p.title,p.text,p.jraText,p.narDetailText].filter(Boolean).join(' '),r.type);
   return r
 }
-const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,raceLevelOne,strengthAdjustedPerformance,raceLevelProfile,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationContext,calibrateContextOne,calibrationStatus,learnTicketThresholds,sameDayTrackBias,trackBiasAdjustment,biasStyleCode,rankingDiagnostics,effectGroupStats,v119EffectDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parsePlaceOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ACTIVE_TYPES_116,ACTIVE_TYPES_117,raceChaosFeatures,predictChaos,empiricalTicketGate,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,dailyExactStats,exactTicketRows,conditionRoiRanking,roiOddsBand,roiProbBand,roiEvBand,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
+const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,raceLevelOne,strengthAdjustedPerformance,raceLevelProfile,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationContext,calibrateContextOne,calibrationStatus,learnTicketThresholds,sameDayTrackBias,trackBiasAdjustment,biasStyleCode,rankingDiagnostics,effectGroupStats,v119EffectDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parsePlaceOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ACTIVE_TYPES_116,ACTIVE_TYPES_117,raceChaosFeatures,predictChaos,empiricalTicketGate,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,dailyExactStats,exactTicketRows,conditionRoiRanking,modelVersionTuple,modelVersionAtLeast,roiOddsBand,roiProbBand,roiEvBand,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
