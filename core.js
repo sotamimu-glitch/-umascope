@@ -1866,9 +1866,99 @@ function v119EffectDiagnostics(history){
     }
   }
 }
+
+// ============================================================
+// v1.19.3 — prospective "strong-candidate" shadow test
+// IMPORTANT: this does NOT change prediction or purchase logic.
+// Only tickets saved from 1.19.3 onward are evaluated.
+// ============================================================
+const SHADOW_RULE_VERSION_1193='S1193-v1';
+
+function shadowTicketNormalize(t){
+  const z=normalizeStoredTicket(t);if(!z)return null;
+  const rules=Array.isArray(t?.rules)?t.rules:Array.isArray(t?.r)?t.r:[];
+  const level=String(t?.level||t?.a||'A');
+  return {...z,rules:[...new Set(rules.map(String))],level}
+}
+function buildStrongShadowTickets(tickets,race={}){
+  const out=[],d=Number(race.distance),chaos=race.chaosLabel||'中',
+        surface=race.surface||'',market=(race.type||race.market)==='local'?'地方':'中央';
+  for(const t0 of tickets||[]){
+    const t=normalizeStoredTicket(t0);if(!t)continue;
+    const type=canonType(t.type);
+    if(type!=='単勝'&&type!=='複勝')continue;
+    const rules=[],p=Number(t.prob),o=Number(t.odds);
+    if(type==='単勝'){
+      if(Number.isFinite(p)&&p>=.10&&p<.15)rules.push('単勝:予測勝率10～14%');
+      if(Number.isFinite(d)&&d>=2100&&d<=2400)rules.push('単勝:2100～2400m');
+      if(chaos==='荒'&&Number.isFinite(o)&&o>=12)rules.push('単勝:12倍以上×荒');
+      if(surface==='芝'&&chaos==='荒')rules.push('単勝:芝×荒');
+      if(market==='中央'&&chaos==='荒')rules.push('単勝:中央×荒')
+    }else{
+      if(Number.isFinite(d)&&d>=2100&&d<=2400)rules.push('複勝:2100～2400m');
+      if(Number.isFinite(d)&&d>=2100&&d<=2400&&chaos==='堅')rules.push('複勝:2100～2400m×堅');
+      if(surface==='芝'&&chaos==='堅')rules.push('複勝:芝×堅')
+    }
+    if(!rules.length)continue;
+    out.push({...t,rules,level:rules.length>=2?'A+':'A'})
+  }
+  const seen=new Set();
+  return out.filter(t=>{const k=canonType(t.type)+'|'+t.key;if(seen.has(k))return false;seen.add(k);return true})
+}
+function shadowTickets(entry){
+  return (entry?.shadowStrongTickets||[]).map(shadowTicketNormalize).filter(Boolean)
+}
+function shadowExactStats(history,opts={}){
+  const level=opts.level||'all',type=opts.type?canonType(opts.type):null,rule=opts.rule||null;
+  let tickets=0,graded=0,hits=0,races=0,raceHits=0,completeRaces=0,completeTickets=0,stake=0,payout=0,missingWins=0;
+  for(const x of history||[]){
+    if(x?.shadowRuleVersion!==SHADOW_RULE_VERSION_1193)continue;
+    const result=historyResult(x);
+    const ts=shadowTickets(x).filter(t=>{
+      if(level!=='all'&&t.level!==level)return false;
+      if(type&&canonType(t.type)!==type)return false;
+      if(rule&&!t.rules.includes(rule))return false;
+      return true
+    });
+    if(!ts.length)continue;
+    let rgraded=0,rhits=0,rstake=0,rpayout=0,rmissing=0;
+    for(const t of ts){
+      const g=ticketGrade(t,result);if(g==null)continue;
+      rgraded++;graded++;tickets++;
+      if(g){rhits++;hits++}
+      const off=officialPayoutForTicket(x,t);
+      if(off.refund){rstake+=100;rpayout+=100;continue}
+      if(g&&off.amount==null){rmissing++;missingWins++;continue}
+      rstake+=100;if(g&&off.amount!=null)rpayout+=off.amount
+    }
+    if(rgraded){races++;if(rhits)raceHits++}
+    // For ROI, exclude the race if a winning shadow ticket is missing its official payout.
+    if(rgraded&&rmissing===0){
+      completeRaces++;completeTickets+=rgraded;stake+=rstake;payout+=rpayout
+    }
+  }
+  return {
+    tickets,graded,hits,rate:graded?hits/graded:null,
+    races,raceHits,raceRate:races?raceHits/races:null,
+    completeRaces,completeTickets,stake,payout,roi:stake?payout/stake:null,missingWins
+  }
+}
+function shadowStrongStats(history){
+  const all=shadowExactStats(history),
+        plus=shadowExactStats(history,{level:'A+'}),
+        single=shadowExactStats(history,{type:'単勝'}),
+        place=shadowExactStats(history,{type:'複勝'});
+  const ruleSet=new Set();
+  for(const x of history||[])for(const t of shadowTickets(x))for(const r of t.rules||[])ruleSet.add(r);
+  const rules=[...ruleSet].map(rule=>({rule,...shadowExactStats(history,{rule})}))
+    .sort((a,b)=>(b.completeTickets-a.completeTickets)||((b.roi||0)-(a.roi||0)));
+  const savedRaces=(history||[]).filter(x=>x?.shadowRuleVersion===SHADOW_RULE_VERSION_1193).length;
+  const candidateRaces=(history||[]).filter(x=>x?.shadowRuleVersion===SHADOW_RULE_VERSION_1193&&shadowTickets(x).length).length;
+  return {ruleVersion:SHADOW_RULE_VERSION_1193,savedRaces,candidateRaces,all,plus,single,place,rules}
+}
 function parse(raw){
   const p=parsePayload(raw),r=parseNAR(p)||parseJRA(p);
   if(r)r.classLevel=classLevelFromText([r.name,p.title,p.text,p.jraText,p.narDetailText].filter(Boolean).join(' '),r.type);
   return r
 }
-const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,raceLevelOne,strengthAdjustedPerformance,raceLevelProfile,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationContext,calibrateContextOne,calibrationStatus,learnTicketThresholds,sameDayTrackBias,trackBiasAdjustment,biasStyleCode,rankingDiagnostics,effectGroupStats,v119EffectDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parsePlaceOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ACTIVE_TYPES_116,ACTIVE_TYPES_117,raceChaosFeatures,predictChaos,empiricalTicketGate,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,dailyExactStats,exactTicketRows,conditionRoiRanking,modelVersionTuple,modelVersionAtLeast,roiOddsBand,roiProbBand,roiEvBand,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
+const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,raceLevelOne,strengthAdjustedPerformance,raceLevelProfile,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationContext,calibrateContextOne,calibrationStatus,learnTicketThresholds,sameDayTrackBias,trackBiasAdjustment,biasStyleCode,rankingDiagnostics,effectGroupStats,v119EffectDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parsePlaceOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ACTIVE_TYPES_116,ACTIVE_TYPES_117,raceChaosFeatures,predictChaos,empiricalTicketGate,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,dailyExactStats,exactTicketRows,conditionRoiRanking,SHADOW_RULE_VERSION_1193,buildStrongShadowTickets,shadowTickets,shadowExactStats,shadowStrongStats,modelVersionTuple,modelVersionAtLeast,roiOddsBand,roiProbBand,roiEvBand,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);

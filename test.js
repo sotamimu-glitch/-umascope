@@ -518,3 +518,45 @@ console.log('v1.9 tests: ALL OK');
   if(r119.totalExactTickets!==10)throw Error('1.19+ ranking count '+r119.totalExactTickets);
   console.log('v1.19.2 condition ranking scope: OK');
 }
+
+
+// v1.19.3 prospective shadow-test regression
+{
+  const tickets=[
+    {type:'単勝',key:'1',numbers:[1],prob:.12,odds:13},
+    {type:'複勝',key:'2',numbers:[2],prob:.55,odds:2.1},
+    {type:'単勝',key:'3',numbers:[3],prob:.25,odds:4}
+  ];
+  const s=C.buildStrongShadowTickets(tickets,{type:'central',surface:'芝',distance:2200,chaosLabel:'荒'});
+  const w=s.find(x=>x.key==='1'&&x.type==='単勝');
+  const p=s.find(x=>x.key==='2'&&x.type==='複勝');
+  if(!w||w.level!=='A+'||w.rules.length<4)throw Error('v1.19.3 strong single '+JSON.stringify(w));
+  if(!p||p.rules.length!==1)throw Error('v1.19.3 place rule '+JSON.stringify(p));
+  console.log('v1.19.3 shadow rule builder: OK');
+}
+{
+  const h=[{
+    shadowRuleVersion:C.SHADOW_RULE_VERSION_1193,
+    shadowStrongTickets:[
+      {t:'単勝',k:'1',n:[1],p:.12,o:13,r:['単勝:予測勝率10～14%'],a:'A'},
+      {t:'複勝',k:'2',n:[2],p:.55,o:2,r:['複勝:2100～2400m'],a:'A'}
+    ],
+    result:{first:1,second:2,third:3},
+    officialPayouts:{'単勝|1':500,'複勝|2':180}
+  }];
+  const s=C.shadowStrongStats(h);
+  if(s.candidateRaces!==1||s.all.graded!==2||s.all.hits!==2)throw Error('v1.19.3 shadow grading '+JSON.stringify(s));
+  if(Math.abs(s.all.roi-3.4)>1e-9)throw Error('v1.19.3 shadow ROI '+s.all.roi);
+  console.log('v1.19.3 shadow official ROI: OK');
+}
+{
+  const h=[{
+    modelVersion:'1.19-bias-level-calibration',
+    result:{first:1,second:2,third:3},
+    aiTickets:[{type:'単勝',key:'1',numbers:[1]}],
+    officialPayouts:{'単勝|1':500}
+  }];
+  const s=C.shadowStrongStats(h);
+  if(s.savedRaces!==0||s.all.graded!==0)throw Error('v1.19.3 must not backfill old history');
+  console.log('v1.19.3 prospective-only history: OK');
+}

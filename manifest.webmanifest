@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.19.2",
+  "name": "UmaScope Free AutoBet 1.19.3",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "1.19.1の予測ロジックを維持し、条件別ROIランキングの1.17以降・1.19以降・全期間の集計範囲を正しく修正"
+  "description": "予測・購入ロジックを変えず、単勝・複勝の高ROI条件を固定ルールで前向きに検証する強候補シャドーテストを追加"
 }
