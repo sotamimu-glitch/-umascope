@@ -6,7 +6,7 @@ const r=C.parse(JSON.stringify(p));ok(r,'NAR parse');ok(r.horses[0].recent.lengt
 // six indices
 r.horses.push({number:2,frame:2,name:'テスト2',jockey:'山崎雅',weight:55,odds:5.0,recent:[{finish:1,field:10,pop:2,margin:.2,jockey:'山崎雅',weight:55,distance:1300,surface:'ダ',going:'良',corners:[2,2,1]},{finish:2,field:10,pop:3,margin:.3,jockey:'山崎雅',weight:55,distance:1300,surface:'ダ',going:'稍重',corners:[3,3,2]},{finish:3,field:10,pop:5,margin:.4,jockey:'別騎手',weight:56,distance:1400,surface:'ダ',going:'良',corners:[4,4,3]}],records:{venue:[1,1,1,3],distance:[1,1,0,2]}});r.horses[0].odds=8.0;r.going='良';const ix=C.sixIndices(r.horses[1],r);for(const k of ['ability','suitability','pace','jockey','form','value'])ok(ix[k]>=10&&ix[k]<=100,'index '+k);const rows=C.rank(r);ok(rows[0].indices.value>=10,'value index');console.log('Six indices: OK',rows.map(x=>[x.h.number,x.score,x.grade,x.indices]));
 // combo predictions and target planner
-r.comboOdds={quinella:{'1-2':4.5},wide:{'1-2':2.5},trio:{}};const rec=C.ticketRecommendations(rows,r.comboOdds,1.20);ok(rec.single.length,'single rec');ok(rec.wide.length,'wide rec');ok(rec.quinella.length,'quinella rec');const plan=C.targetPlan(rows,r.comboOdds,{budget:1000,targetRoi:1.20,targetHit:.70});ok(plan.recommendations&&plan.targetRoi===1.20&&plan.targetHit===.70,'target plan');console.log('Target plan: OK',plan.meets,plan.hitProb,plan.roi,plan.tickets);
+r.comboOdds={quinella:{'1-2':4.5},wide:{'1-2':2.5},trio:{}};const rec=C.ticketRecommendations(rows,r.comboOdds,1.20);ok(rec.wide.length||rec.quinella.length,'pair rec');const plan=C.targetPlan(rows,r.comboOdds,{budget:1000});ok(plan.recommendations&&plan.targetRoi===1.05&&plan.targetHit===null,'target plan');console.log('Target plan: OK',plan.meets,plan.hitProb,plan.roi,plan.tickets);
 // old 馬連 history remains gradeable as 馬複
 ok(C.ticketGrade({type:'馬連',numbers:[1,2]},{first:2,second:1,third:3})===true,'old 馬連 migration');ok(C.ticketGrade({type:'馬複',numbers:[1,2]},{first:1,second:2,third:3})===true,'馬複 grade');
 console.log('v1.9 tests: ALL OK');
@@ -93,11 +93,8 @@ console.log('v1.9 tests: ALL OK');
     comboOdds.trio[[ns[i],ns[j],ns[k]].sort((a,b)=>a-b).join('-')]=18;
   }
   const rec=C.ticketRecommendations(rows,comboOdds,1.2);
-  const allowedWide=new Set(['1-2','1-3','2-3','1-4']);
-  const allowedQ=new Set(['1-2','1-3','2-3']);
-  if(rec.wide.some(x=>!allowedWide.has(x.key)))throw Error('v1.11 wide not top-rank centered '+JSON.stringify(rec.wide));
-  if(rec.quinella.some(x=>!allowedQ.has(x.key)))throw Error('v1.11 quinella not top-rank centered '+JSON.stringify(rec.quinella));
-  if(rec.trio.length!==0)throw Error('v1.16 trio should be disabled '+JSON.stringify(rec.trio));
+  if(rec.single.length||rec.place.length||rec.trio.length)throw Error('v1.20 pair-only recommendations '+JSON.stringify(rec));
+  if(!rec.wide.length&&!rec.quinella.length)throw Error('v1.20 pair recommendations missing');
   console.log('v1.11 stable combo selection: OK', rec.wide.map(x=>x.key),rec.quinella.map(x=>x.key),rec.trio.map(x=>x.key));
 }
 
@@ -160,7 +157,7 @@ console.log('v1.9 tests: ALL OK');
   if(Math.abs(s1-1)>.02||Math.abs(s2-2)>.03||Math.abs(s3-3)>.04)throw Error('v1.13 probability sums '+[s1,s2,s3]);
   for(const x of rows){if(!x.roleRanks||x.pWin>x.pTop2+.01||x.pTop2>x.pTop3+.01)throw Error('v1.13 roles/monotonic '+JSON.stringify(x))}
   const rec=C.ticketRecommendations(rows,rr.comboOdds,C.learnTicketThresholds([],rr.type));
-  if(!rec.single.length||!rec.wide.length||!rec.quinella.length)throw Error('v1.16 active recommendations missing');
+  if(rec.single.length||rec.place.length||rec.trio.length||(!rec.wide.length&&!rec.quinella.length))throw Error('v1.20 pair-only recommendations missing');
   console.log('v1.13 role models: OK',rows.map(x=>[x.h.number,x.roleRanks,x.pWin.toFixed(3),x.pTop2.toFixed(3),x.pTop3.toFixed(3)]));
 }
 {
@@ -275,7 +272,7 @@ console.log('v1.9 tests: ALL OK');
  ];rows.simulation={quinella:{'1-2':.22,'1-3':.16,'2-3':.13},wide:{'1-2':.48,'1-3':.42,'2-3':.36},trio:{'1-2-3':.25},orders:{}};
  const c=C.predictChaos(rows,{});if(!['荒','中','堅'].includes(c.label))throw Error('v1.16 chaos');
  const rec=C.ticketRecommendations(rows,{quinella:{'1-2':7,'1-3':9,'2-3':12},wide:{'1-2':2.5,'1-3':3,'2-3':4},trio:{'1-2-3':15}},{'単勝':1.12,'馬複':1.28,'ワイド':1.22});
- if(rec.trio.length)throw Error('v1.16 trio enabled');if(!rec.single.length||!rec.quinella.length||!rec.wide.length)throw Error('v1.16 active types');
+ if(rec.trio.length||rec.single.length||rec.place.length)throw Error('v1.20 non-pair types enabled');if(!rec.quinella.length&&!rec.wide.length)throw Error('v1.20 pair types missing');
  console.log('v1.16 three types/chaos: OK',c.label)
 }
 {
@@ -316,8 +313,8 @@ console.log('v1.9 tests: ALL OK');
     {h:{number:3,placeOdds:2.5},roleRanks:{win:3,top2:3,top3:3},pWin:.16,pTop2:.37,pTop3:.51,prob:.16,odds:8,ev:1.28}
   ];
   const rec=C.ticketRecommendations(rows,{quinella:{'1-2':8,'1-3':13,'2-3':16},wide:{'1-2':2.7,'1-3':3.8,'2-3':4.5}},{'単勝':1.12,'複勝':1.10,'馬複':1.36,'ワイド':1.30});
-  if(!rec.place?.length||rec.place[0].type!=='複勝')throw Error('v1.17 place recommendation '+JSON.stringify(rec));
-  console.log('v1.17 single/place recommendations: OK');
+  if(rec.place?.length||rec.single?.length)throw Error('v1.20 single/place should not be purchase recommendations '+JSON.stringify(rec));
+  console.log('v1.20 pair-only recommendations override: OK');
 }
 {
   const h=[
@@ -559,4 +556,53 @@ console.log('v1.9 tests: ALL OK');
   const s=C.shadowStrongStats(h);
   if(s.savedRaces!==0||s.all.graded!==0)throw Error('v1.19.3 must not backfill old history');
   console.log('v1.19.3 prospective-only history: OK');
+}
+
+
+// v1.20 axis -> dark horse strategy regression
+{
+  const rows=[
+    {h:{number:1,name:'Axis',odds:2.5},pWin:.28,pTop2:.52,pTop3:.70,prob:.28,score:78,roleRanks:{win:1,top2:1,top3:1},indices:{suitability:75,pace:70,form:72},auto:{confidence:.8}},
+    {h:{number:2,name:'HoleA',odds:12},pWin:.12,pTop2:.31,pTop3:.48,prob:.12,score:66,roleRanks:{win:3,top2:3,top3:2},indices:{suitability:72,pace:69,form:70},auto:{confidence:.7}},
+    {h:{number:3,name:'HoleB',odds:18},pWin:.09,pTop2:.25,pTop3:.40,prob:.09,score:63,roleRanks:{win:4,top2:4,top3:3},indices:{suitability:68,pace:72,form:65},auto:{confidence:.7}},
+    {h:{number:4,name:'Fav2',odds:3.2},pWin:.18,pTop2:.38,pTop3:.54,prob:.18,score:70,roleRanks:{win:2,top2:2,top3:4},indices:{suitability:70,pace:66,form:68},auto:{confidence:.7}}
+  ];
+  rows.modelMeta={market:'central'};
+  const odds={quinella:{'1-2':12,'1-3':16,'1-4':7},wide:{'1-2':5.5,'1-3':6.2,'1-4':3.5},trio:{}};
+  const p=C.axisHoleProfile120(rows,{});
+  if(p.anchor.number!==1)throw Error('v1.20 axis '+JSON.stringify(p.anchor));
+  if(!p.holes.some(x=>x.number===2))throw Error('v1.20 hole missing '+JSON.stringify(p.holes));
+  const plan=C.targetPlan(rows,odds,{budget:500,race:{surface:'芝',distance:1600},chaos:{label:'荒'}});
+  if(plan.tickets.some(t=>!['馬複','ワイド'].includes(t.type)))throw Error('v1.20 invalid type');
+  if(plan.tickets.some(t=>t.type==='馬複'&&t.odds<10))throw Error('v1.20 quinella odds gate');
+  if(plan.tickets.some(t=>t.type==='ワイド'&&t.odds<5))throw Error('v1.20 wide odds gate');
+  if(plan.tickets.some(t=>!t.numbers.includes(plan.anchor)))throw Error('v1.20 every ticket must include axis');
+  if(new Set(plan.tickets.map(t=>t.type)).size>1)throw Error('v1.20 one bet type per race');
+  console.log('v1.20 axis-hole odds gates: OK',plan.selectedType,plan.tickets.map(x=>[x.type,x.key,x.odds,x.ev]));
+}
+{
+  const rows=[
+    {h:{number:1,name:'A',odds:2},pWin:.4,pTop2:.65,pTop3:.8,prob:.4,score:80,roleRanks:{win:1,top2:1,top3:1},indices:{suitability:75,pace:75,form:75},auto:{confidence:.8}},
+    {h:{number:2,name:'B',odds:10},pWin:.15,pTop2:.3,pTop3:.45,prob:.15,score:65,roleRanks:{win:2,top2:2,top3:2},indices:{suitability:65,pace:65,form:65},auto:{confidence:.7}},
+    {h:{number:3,name:'C',odds:15},pWin:.1,pTop2:.25,pTop3:.4,prob:.1,score:60,roleRanks:{win:3,top2:3,top3:3},indices:{suitability:62,pace:66,form:63},auto:{confidence:.7}}
+  ];
+  rows.modelMeta={market:'central'};
+  const odds={quinella:{'1-2':9.9,'1-3':9.8},wide:{'1-2':4.9,'1-3':4.8},trio:{}};
+  const plan=C.targetPlan(rows,odds,{budget:500,race:{},chaos:{label:'中'}});
+  if(plan.meets||plan.tickets.length)throw Error('v1.20 must reject below min odds');
+  console.log('v1.20 below-min odds rejection: OK');
+}
+{
+  const h=[{
+    strategyVersion:C.STRATEGY_VERSION_120,
+    strategySnapshot:{anchor:1,holes:[{number:2},{number:3}],selectedType:'ワイド'},
+    tickets:[{t:'ワイド',k:'1-2',n:[1,2],e:1.4,p:.25,o:5.6}],
+    aiTickets:[{t:'ワイド',k:'1-2',n:[1,2],e:1.4,p:.25,o:5.6}],
+    result:{first:4,second:1,third:2},
+    officialPayouts:{'ワイド|1-2':700}
+  }];
+  const s=C.strategy120Stats(h);
+  if(s.entries!==1||s.candidateRaces!==1||Math.abs(s.roi-7)>1e-9)throw Error('v1.20 strategy stats '+JSON.stringify(s));
+  if(Math.abs(s.axisTop3Rate-1)>1e-9||Math.abs(s.holeTop3Rate-1)>1e-9)throw Error('v1.20 axis/hole stats');
+  console.log('v1.20 official ROI stats: OK');
 }

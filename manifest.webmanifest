@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.19.3",
+  "name": "UmaScope Free AutoBet 1.20",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "予測・購入ロジックを変えず、単勝・複勝の高ROI条件を固定ルールで前向きに検証する強候補シャドーテストを追加"
+  "description": "回収率優先。馬連またはワイドだけで、安定した軸馬から吟味した穴馬へ流す。馬連10倍以上・ワイド5倍以上を買い目候補にする。"
 }
