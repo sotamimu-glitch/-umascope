@@ -397,7 +397,7 @@ function typeAccuracy(history,type){
   return {type,hits,total,rate:total?hits/total:null,raceHits,raceTotal,raceRate:raceTotal?raceHits/raceTotal:null,withOdds,stake,payout,roi:stake?payout/stake:null}
 }
 function allTypeAccuracy(history){return ['単勝','馬複','ワイド','三連複'].map(type=>typeAccuracy(history,type))}
-function normalizeStoredTicket(t){if(!t)return null;if(t.type)return {...t,type:canonType(t.type),numbers:ticketNumbers(t)};if(t.t)return {type:canonType(t.t),key:String(t.k??''),numbers:Array.isArray(t.n)?t.n.map(Number):ticketNumbers({key:t.k}),ev:t.e==null?null:Number(t.e),prob:t.p==null?null:Number(t.p),odds:t.o==null?null:Number(t.o)};return null}
+function normalizeStoredTicket(t){if(!t)return null;if(t.type)return {...t,type:canonType(t.type),numbers:ticketNumbers(t)};if(t.t)return {type:canonType(t.t),key:String(t.k??''),numbers:Array.isArray(t.n)?t.n.map(Number):ticketNumbers({key:t.k}),ev:t.e==null?null:Number(t.e),prob:t.p==null?null:Number(t.p),odds:t.o==null?null:Number(t.o),forecastOdds:t.fo==null?null:Number(t.fo),forecastLow:t.fl==null?null:Number(t.fl),forecastHigh:t.fh==null?null:Number(t.fh),actualOdds:t.ao==null?null:Number(t.ao),oddsSource:t.os||null};return null}
 function backtestTickets(x){const a=allSuggestedTickets(x);return a.length?a:historyTickets(x)}
 function allSuggestedTickets(x){
   const source=(x?.aiTickets&&x.aiTickets.length)?x.aiTickets:(x?.backtestTickets&&x.backtestTickets.length)?x.backtestTickets:historyTickets(x);
@@ -2101,9 +2101,214 @@ function strategy120Stats(history){
     axisTop3Rate:settled?axisTop3/settled:null,holeTop3Rate:settled?holeTop3/settled:null
   }
 }
+
+// ============================================================
+// v1.20.1 — pre-odds market forecast
+// Actual combo odds always override forecast odds.
+// Forecast odds are generated from a separate "expected market"
+// proxy (past popularity + recent finish + jockey + ability/form),
+// not directly from the model's win/top3 probabilities.
+// ============================================================
+const STRATEGY_VERSION_1201='axis-hole-v1201-forecastodds';
+
+function weighted01(items){
+  let s=0,w=0;
+  for(const it of items||[]){
+    if(it?.v==null||!Number.isFinite(Number(it.v)))continue;
+    const ww=Number(it.w)||1;s+=Number(it.v)*ww;w+=ww
+  }
+  return w?s/w:null
+}
+function marketHistorySignal1201(x){
+  const recent=(x?.h?.recent||[]).slice(0,6),popItems=[],finItems=[];
+  let popN=0;
+  recent.forEach((r,i)=>{
+    const field=Math.max(Number(r.field)||Number(r.pop)||Number(r.finish)||2,2),
+          w=Math.pow(.82,i);
+    if(Number.isFinite(Number(r.pop))&&Number(r.pop)>=1){
+      popN++;
+      popItems.push({v:clamp(1-(Number(r.pop)-1)/(field-1),0,1),w})
+    }
+    if(Number.isFinite(Number(r.finish))&&Number(r.finish)>=1){
+      finItems.push({v:clamp(1-(Number(r.finish)-1)/(field-1),0,1),w})
+    }
+  });
+  return {
+    popularity:weighted01(popItems)??.5,
+    finish:weighted01(finItems)??.5,
+    popCoverage:recent.length?popN/recent.length:0,
+    evidence:recent.length
+  }
+}
+function forecastMarketProbabilities1201(rows){
+  const n=Math.max(1,rows?.length||1),items=(rows||[]).map(x=>{
+    const h=marketHistorySignal1201(x),
+          jockey=clamp((Number(x?.indices?.jockey)||50)/100,0,1),
+          ability=clamp((Number(x?.indices?.ability)||50)/100,0,1),
+          form=clamp((Number(x?.indices?.form)||50)/100,0,1),
+          score=.52*h.popularity+.18*h.finish+.12*jockey+.10*ability+.08*form;
+    return {no:x.h.number,score,h}
+  });
+  const mx=Math.max(...items.map(x=>x.score),.5),
+        raw=items.map(x=>Math.exp((x.score-mx)*4.4)),
+        sum=raw.reduce((a,b)=>a+b,0)||1,
+        avgCov=items.reduce((s,x)=>s+x.h.popCoverage,0)/Math.max(items.length,1),
+        histAlpha=clamp(.55+.28*avgCov,.55,.83);
+  let probs=raw.map(v=>histAlpha*(v/sum)+(1-histAlpha)/n);
+
+  // If win odds already exist but pair odds do not, they are a strong market clue.
+  const imp=rows.map(x=>Number(x?.odds)>1?1/Number(x.odds):null),
+        impCount=imp.filter(Number.isFinite).length;
+  if(impCount>=Math.max(3,Math.ceil(n*.45))){
+    const impSum=imp.reduce((s,v)=>s+(Number.isFinite(v)?v:0),0)||1,
+          impNorm=imp.map((v,i)=>Number.isFinite(v)?v/impSum:probs[i]),
+          beta=clamp(.52+.35*(impCount/n),.52,.82);
+    probs=probs.map((p,i)=>beta*impNorm[i]+(1-beta)*p);
+    const s=probs.reduce((a,b)=>a+b,0)||1;probs=probs.map(p=>p/s)
+  }
+  const by={};items.forEach((x,i)=>by[x.no]=probs[i]);
+  const confidence=clamp(.35+.43*avgCov+.22*(impCount/n),.35,.93);
+  return {by,confidence,popCoverage:avgCov,winOddsCoverage:impCount/n,items:items.map((x,i)=>({...x,prob:probs[i]}))}
+}
+function forecastPairOdds1201(rows){
+  const m=forecastMarketProbabilities1201(rows),nos=(rows||[]).map(x=>x.h.number),
+        quinella={},wide={},detail={quinella:{},wide:{}},
+        qScale=.80,wScale=.80,
+        conservativeFactor=clamp(.78+.12*m.confidence,.80,.89),
+        highFactor=clamp(1.34-.16*m.confidence,1.19,1.28);
+  for(let i=0;i<nos.length;i++)for(let j=i+1;j<nos.length;j++){
+    const a=nos[i],b=nos[j],key=comboKey([a,b]),
+          qp=quinellaProb(a,b,m.by),wp=wideProb(a,b,m.by),
+          qo=clamp(qScale/Math.max(qp,.0008),1.1,999.9),
+          wo=clamp(wScale/Math.max(wp,.0012),1.1,999.9);
+    quinella[key]=qo;wide[key]=wo;
+    detail.quinella[key]={mid:qo,low:qo*conservativeFactor,high:qo*highFactor,marketProb:qp};
+    detail.wide[key]={mid:wo,low:wo*conservativeFactor,high:wo*highFactor,marketProb:wp}
+  }
+  return {...m,quinella,wide,detail,conservativeFactor,highFactor}
+}
+function enrichPairWithForecast1201(x,type,actualOdds,fo){
+  const typ=type==='馬連'?'馬複':type,
+        d=typ==='馬複'?fo.detail.quinella?.[x.key]:fo.detail.wide?.[x.key],
+        hasActual=Number.isFinite(Number(actualOdds))&&Number(actualOdds)>1,
+        evalOdds=hasActual?Number(actualOdds):Number(d?.low),
+        forecastMid=Number(d?.mid),
+        source=hasActual?'実オッズ':'予想オッズ';
+  return {
+    ...x,
+    odds:Number.isFinite(evalOdds)?evalOdds:null,
+    ev:Number.isFinite(evalOdds)?(Number(x.prob)||0)*evalOdds:null,
+    forecastOdds:Number.isFinite(forecastMid)?forecastMid:null,
+    forecastLow:Number.isFinite(Number(d?.low))?Number(d.low):null,
+    forecastHigh:Number.isFinite(Number(d?.high))?Number(d.high):null,
+    oddsSource:source,
+    actualOdds:hasActual?Number(actualOdds):null,
+    forecastConfidence:fo.confidence
+  }
+}
+
+// Override pair recommendations: use actual odds when available, otherwise
+// conservative forecast odds. This keeps pre-odds analysis usable.
+function ticketRecommendations(rows,comboOdds={},thresholds={}){
+  const profile=axisHoleProfile120(rows,{}),
+        base=combinationAdvice(rows,{},1.20),
+        fo=forecastPairOdds1201(rows),
+        qm=new Map((base.quinella||[]).map(x=>[x.key,x])),
+        wm=new Map((base.wide||[]).map(x=>[x.key,x])),
+        q=[],w=[],anchor=profile.anchor?.number;
+  for(const h of profile.holes){
+    const key=comboKey([anchor,h.number]),qq0=qm.get(key),ww0=wm.get(key);
+    if(qq0){
+      const qq=enrichPairWithForecast1201(qq0,'馬複',comboOdds.quinella?.[key],fo);
+      q.push({...qq,anchor,hole:h.number,holeName:h.name,holeScore:h.score,minOdds:PAIR_MIN_ODDS_120['馬複'],
+        oddsPass:qq.odds!=null&&Number(qq.odds)>=PAIR_MIN_ODDS_120['馬複'],evPass:qq.ev!=null&&Number(qq.ev)>=PAIR_MIN_EV_120})
+    }
+    if(ww0){
+      const ww=enrichPairWithForecast1201(ww0,'ワイド',comboOdds.wide?.[key],fo);
+      w.push({...ww,anchor,hole:h.number,holeName:h.name,holeScore:h.score,minOdds:PAIR_MIN_ODDS_120['ワイド'],
+        oddsPass:ww.odds!=null&&Number(ww.odds)>=PAIR_MIN_ODDS_120['ワイド'],evPass:ww.ev!=null&&Number(ww.ev)>=PAIR_MIN_EV_120})
+    }
+  }
+  q.sort((a,b)=>roiFirstPairScore120(b)-roiFirstPairScore120(a));
+  w.sort((a,b)=>roiFirstPairScore120(b)-roiFirstPairScore120(a));
+  return {single:[],place:[],quinella:q,wide:w,trio:[],profile,forecastOdds:fo}
+}
+function targetPlan(rows,comboOdds={},opts={}){
+  const budget=Math.max(100,Math.floor((Number(opts.budget)||1000)/100)*100),
+        race=opts.race||{},chaos=opts.chaos||predictChaos(rows,race),
+        rec=ticketRecommendations(rows,comboOdds,{}),profile=rec.profile||axisHoleProfile120(rows,race),
+        maxTickets=Math.min(3,Math.floor(budget/100)),
+        eligibleQ=rec.quinella.filter(x=>x.oddsPass&&x.evPass),
+        eligibleW=rec.wide.filter(x=>x.oddsPass&&x.evPass),
+        qScore=eligibleQ.length?eligibleQ.slice(0,2).reduce((s,x)=>s+roiFirstPairScore120(x),0)/Math.min(2,eligibleQ.length):-Infinity,
+        wScore=eligibleW.length?eligibleW.slice(0,2).reduce((s,x)=>s+roiFirstPairScore120(x),0)/Math.min(2,eligibleW.length):-Infinity;
+  let selectedType=null;
+  if(qScore>-Infinity||wScore>-Infinity){
+    if(Math.abs(qScore-wScore)<.04)selectedType=chaos.label==='荒'&&eligibleQ.length?'馬複':eligibleW.length?'ワイド':'馬複';
+    else selectedType=qScore>wScore?'馬複':'ワイド'
+  }
+  let candidates=selectedType==='馬複'?eligibleQ:selectedType==='ワイド'?eligibleW:[],
+      chosen=candidates.slice(0,maxTickets);
+  if(chosen.length>1){
+    const top=roiFirstPairScore120(chosen[0]);
+    chosen=chosen.filter((x,i)=>i===0||roiFirstPairScore120(x)>=top-.30)
+  }
+  const tickets=chosen.map(x=>({...x,amount:100})),
+        hitProb=portfolioHitProbability(tickets,rows),
+        roi=tickets.length?tickets.reduce((s,x)=>s+(Number(x.ev)||0),0)/tickets.length:null,
+        provisional=tickets.some(x=>x.oddsSource==='予想オッズ'),
+        allActual=tickets.length>0&&tickets.every(x=>x.oddsSource==='実オッズ'),
+        meets=tickets.length>0,
+        anyActual=[...rec.quinella,...rec.wide].some(x=>x.oddsSource==='実オッズ'),
+        reason=meets
+          ?`${selectedType==='馬複'?'馬連':'ワイド'}を選択。軸→穴の回収率優先${provisional?'（予想オッズで仮判定）':''}`
+          :anyActual?'実オッズ/予想オッズとも条件未達':'予想オッズで条件未達';
+  return {
+    tickets,bestEffort:chosen,recommendations:rec,budget,targetRoi:PAIR_MIN_EV_120,targetHit:null,
+    hitProb,roi,meets,anchor:profile.anchor?.number??null,anchorProfile:profile.anchor,darkHorses:profile.holes,
+    confidence:rows.reduce((s,x)=>s+(x.auto?.confidence||0),0)/Math.max(rows.length,1),
+    stance:meets?(provisional?'仮購入候補あり':'購入候補あり'):(anyActual?'見送り':'事前見送り'),
+    chaos,selectedType,reason,strategyVersion:STRATEGY_VERSION_1201,provisional,allActual,
+    oddsMode:provisional?'forecast':allActual?'actual':'forecast',
+    forecastOdds:rec.forecastOdds,
+    thresholds:{'馬複最低オッズ':PAIR_MIN_ODDS_120['馬複'],'ワイド最低オッズ':PAIR_MIN_ODDS_120['ワイド'],'最低EV':PAIR_MIN_EV_120}
+  }
+}
+function realisticBets(rows,comboOdds={},opts={}){return targetPlan(rows,comboOdds,opts)}
+
+function strategy120Stats(history){
+  const entries=(history||[]).filter(x=>String(x?.strategyVersion||'').startsWith('axis-hole-v120')),
+        purchase=exactStats(entries,'purchase'),q=exactStats(entries,'purchase','馬複'),w=exactStats(entries,'purchase','ワイド');
+  let settled=0,axisTop3=0,holeTop3=0,qRaces=0,wRaces=0,forecastRaces=0,actualRaces=0,errSum=0,errN=0;
+  for(const x of entries){
+    const r=historyResult(x),ts=historyTickets(x);
+    if(ts.some(t=>String(t.oddsSource||t.os||'').includes('予想'))||x.strategySnapshot?.oddsMode==='forecast')forecastRaces++;
+    if(ts.some(t=>String(t.oddsSource||t.os||'').includes('実'))||x.strategySnapshot?.oddsMode==='actual')actualRaces++;
+    for(const t of allSuggestedTickets(x)){
+      const actual=Number(t.actualOdds??t.ao),forecast=Number(t.forecastOdds??t.fo);
+      if(Number.isFinite(actual)&&actual>1&&Number.isFinite(forecast)&&forecast>1){
+        errSum+=Math.abs(forecast-actual)/actual;errN++
+      }
+    }
+    if(!r.first||!r.second||!r.third)continue;
+    settled++;
+    const top=new Set([Number(r.first),Number(r.second),Number(r.third)]),ss=x.strategySnapshot||{};
+    if(top.has(Number(ss.anchor)))axisTop3++;
+    if((ss.holes||[]).some(h=>top.has(Number(h.number??h))))holeTop3++;
+    if(ts.some(t=>canonType(t.type)==='馬複'))qRaces++;
+    if(ts.some(t=>canonType(t.type)==='ワイド'))wRaces++
+  }
+  return {
+    entries:entries.length,settled,candidateRaces:entries.filter(x=>historyTickets(x).length).length,
+    raceRate:purchase.raceRate,roi:purchase.roi,stake:purchase.stake,payout:purchase.payout,
+    quinella:q,wide:w,qRaces,wRaces,forecastRaces,actualRaces,
+    forecastOddsError:errN?errSum/errN:null,forecastOddsComparisons:errN,
+    axisTop3Rate:settled?axisTop3/settled:null,holeTop3Rate:settled?holeTop3/settled:null
+  }
+}
 function parse(raw){
   const p=parsePayload(raw),r=parseNAR(p)||parseJRA(p);
   if(r)r.classLevel=classLevelFromText([r.name,p.title,p.text,p.jraText,p.narDetailText].filter(Boolean).join(' '),r.type);
   return r
 }
-const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,raceLevelOne,strengthAdjustedPerformance,raceLevelProfile,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationContext,calibrateContextOne,calibrationStatus,learnTicketThresholds,sameDayTrackBias,trackBiasAdjustment,biasStyleCode,rankingDiagnostics,effectGroupStats,v119EffectDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parsePlaceOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ACTIVE_TYPES_116,ACTIVE_TYPES_117,raceChaosFeatures,predictChaos,empiricalTicketGate,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,dailyExactStats,exactTicketRows,conditionRoiRanking,SHADOW_RULE_VERSION_1193,STRATEGY_VERSION_120,ACTIVE_TYPES_120,PAIR_MIN_ODDS_120,PAIR_MIN_EV_120,axisScore120,darkHorseScore120,axisHoleProfile120,roiFirstPairScore120,strategy120Stats,buildStrongShadowTickets,shadowTickets,shadowExactStats,shadowStrongStats,modelVersionTuple,modelVersionAtLeast,roiOddsBand,roiProbBand,roiEvBand,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
+const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,raceLevelOne,strengthAdjustedPerformance,raceLevelProfile,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationContext,calibrateContextOne,calibrationStatus,learnTicketThresholds,sameDayTrackBias,trackBiasAdjustment,biasStyleCode,rankingDiagnostics,effectGroupStats,v119EffectDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parsePlaceOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ACTIVE_TYPES_116,ACTIVE_TYPES_117,raceChaosFeatures,predictChaos,empiricalTicketGate,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,dailyExactStats,exactTicketRows,conditionRoiRanking,SHADOW_RULE_VERSION_1193,STRATEGY_VERSION_120,STRATEGY_VERSION_1201,marketHistorySignal1201,forecastMarketProbabilities1201,forecastPairOdds1201,ACTIVE_TYPES_120,PAIR_MIN_ODDS_120,PAIR_MIN_EV_120,axisScore120,darkHorseScore120,axisHoleProfile120,roiFirstPairScore120,strategy120Stats,buildStrongShadowTickets,shadowTickets,shadowExactStats,shadowStrongStats,modelVersionTuple,modelVersionAtLeast,roiOddsBand,roiProbBand,roiEvBand,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);

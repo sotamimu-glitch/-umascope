@@ -606,3 +606,42 @@ console.log('v1.9 tests: ALL OK');
   if(Math.abs(s.axisTop3Rate-1)>1e-9||Math.abs(s.holeTop3Rate-1)>1e-9)throw Error('v1.20 axis/hole stats');
   console.log('v1.20 official ROI stats: OK');
 }
+
+
+// v1.20.1 predicted odds regression
+{
+  const rows=[
+    {h:{number:1,name:'Axis',odds:null,recent:[{pop:1,finish:2,field:12},{pop:2,finish:1,field:12},{pop:2,finish:3,field:14}]},pWin:.27,pTop2:.52,pTop3:.69,prob:.27,score:77,roleRanks:{win:1,top2:1,top3:1},indices:{ability:78,jockey:72,form:74,suitability:74,pace:67},auto:{confidence:.8}},
+    {h:{number:2,name:'Hole',odds:null,recent:[{pop:8,finish:4,field:12},{pop:10,finish:5,field:12},{pop:7,finish:3,field:14}]},pWin:.12,pTop2:.30,pTop3:.46,prob:.12,score:64,roleRanks:{win:4,top2:3,top3:2},indices:{ability:66,jockey:58,form:67,suitability:73,pace:70},auto:{confidence:.7}},
+    {h:{number:3,name:'B',odds:null,recent:[{pop:3,finish:4,field:12},{pop:4,finish:5,field:12}]},pWin:.18,pTop2:.37,pTop3:.52,prob:.18,score:69,roleRanks:{win:2,top2:2,top3:3},indices:{ability:70,jockey:65,form:66,suitability:68,pace:64},auto:{confidence:.7}},
+    {h:{number:4,name:'C',odds:null,recent:[{pop:5,finish:7,field:12},{pop:6,finish:8,field:12}]},pWin:.10,pTop2:.23,pTop3:.36,prob:.10,score:59,roleRanks:{win:5,top2:5,top3:4},indices:{ability:60,jockey:57,form:58,suitability:62,pace:60},auto:{confidence:.6}}
+  ];
+  rows.modelMeta={market:'central'};
+  const f=C.forecastPairOdds1201(rows);
+  if(!f.quinella['1-2']||!f.wide['1-2'])throw Error('v1.20.1 pair odds missing');
+  if(!(f.detail.quinella['1-2'].low<f.detail.quinella['1-2'].mid))throw Error('v1.20.1 conservative range');
+  const rec=C.ticketRecommendations(rows,{},{});
+  const q=rec.quinella.find(x=>x.key==='1-2'),w=rec.wide.find(x=>x.key==='1-2');
+  if(!q||!w||q.oddsSource!=='予想オッズ'||w.oddsSource!=='予想オッズ')throw Error('v1.20.1 forecast source '+JSON.stringify({q,w}));
+  if(Math.abs(q.odds-q.forecastLow)>1e-9)throw Error('v1.20.1 evaluation should use low forecast');
+  console.log('v1.20.1 predicted pair odds: OK',q.forecastOdds.toFixed(1),w.forecastOdds.toFixed(1),f.confidence.toFixed(2));
+}
+{
+  const rows=[
+    {h:{number:1,name:'A',recent:[{pop:1,finish:1,field:10}]},pWin:.35,pTop2:.60,pTop3:.78,prob:.35,score:80,roleRanks:{win:1,top2:1,top3:1},indices:{ability:80,jockey:70,form:75,suitability:75,pace:70},auto:{confidence:.8}},
+    {h:{number:2,name:'B',recent:[{pop:7,finish:3,field:10}]},pWin:.13,pTop2:.31,pTop3:.48,prob:.13,score:65,roleRanks:{win:3,top2:3,top3:2},indices:{ability:65,jockey:60,form:65,suitability:70,pace:68},auto:{confidence:.7}},
+    {h:{number:3,name:'C',recent:[{pop:3,finish:4,field:10}]},pWin:.20,pTop2:.40,pTop3:.55,prob:.20,score:70,roleRanks:{win:2,top2:2,top3:3},indices:{ability:70,jockey:65,form:68,suitability:68,pace:65},auto:{confidence:.7}}
+  ];rows.modelMeta={market:'central'};
+  const rec=C.ticketRecommendations(rows,{quinella:{'1-2':8},wide:{'1-2':4}},{});
+  const q=rec.quinella.find(x=>x.key==='1-2'),w=rec.wide.find(x=>x.key==='1-2');
+  if(q.oddsSource!=='実オッズ'||q.odds!==8||q.actualOdds!==8)throw Error('v1.20.1 actual q override');
+  if(w.oddsSource!=='実オッズ'||w.odds!==4||w.actualOdds!==4)throw Error('v1.20.1 actual w override');
+  if(q.oddsPass||w.oddsPass)throw Error('v1.20.1 actual odds must enforce min threshold');
+  console.log('v1.20.1 actual odds override: OK');
+}
+{
+  const x={t:'馬複',k:'1-4',n:[1,4],e:1.22,p:.08,o:10.5,fo:12.4,fl:10.7,fh:15.2,ao:null,os:'予想オッズ'};
+  const n=C.normalizeStoredTicket?C.normalizeStoredTicket(x):null;
+  if(n&&n.forecastOdds!==12.4)throw Error('v1.20.1 compact forecast metadata');
+  console.log('v1.20.1 storage metadata: OK');
+}

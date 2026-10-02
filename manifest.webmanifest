@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.20",
+  "name": "UmaScope Free AutoBet 1.20.1",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "回収率優先。馬連またはワイドだけで、安定した軸馬から吟味した穴馬へ流す。馬連10倍以上・ワイド5倍以上を買い目候補にする。"
+  "description": "実オッズ前は予想オッズで仮判定。実オッズ取得後は自動で実オッズを優先する、馬連・ワイドの軸→穴回収率戦略。"
 }
