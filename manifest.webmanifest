@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.21",
+  "name": "UmaScope Free AutoBet 1.22",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "公式結果ページから1〜3着と払戻を簡単取込。手入力時も的中したAI買い目の払戻だけを表示する省入力版。"
+  "description": "回収率優先の3段階分析。A事前、B同日3R後、C実オッズ最終判定。馬連10倍・ワイド5倍以上、最終EV150%以上を基本条件にする。"
 }

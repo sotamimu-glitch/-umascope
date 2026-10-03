@@ -688,3 +688,34 @@ console.log('v1.9 tests: ALL OK');
   if(r.payouts[C.payoutKey('馬複',[3,8])]!==1280)throw Error('v1.21 text payout');
   console.log('v1.21 pasted text result import: OK');
 }
+
+// v1.22 staged ROI-first analysis regression
+{
+  const rows=[
+    {h:{number:1,name:'軸A',recent:[]},score:78,pWin:.22,pTop2:.55,pTop3:.78,roleRanks:{win:1,top2:1,top3:1},indices:{ability:76,suitability:74,pace:70,jockey:70,form:72}},
+    {h:{number:2,name:'軸B',recent:[]},score:74,pWin:.18,pTop2:.50,pTop3:.82,roleRanks:{win:2,top2:2,top3:1},indices:{ability:72,suitability:75,pace:68,jockey:68,form:72}},
+    {h:{number:3,name:'穴C',recent:[]},score:64,pWin:.12,pTop2:.32,pTop3:.55,roleRanks:{win:4,top2:4,top3:3},indices:{ability:62,suitability:76,pace:74,jockey:55,form:67}},
+    {h:{number:4,name:'穴D',recent:[]},score:61,pWin:.09,pTop2:.27,pTop3:.48,roleRanks:{win:5,top2:5,top3:4},indices:{ability:60,suitability:72,pace:70,jockey:54,form:65}}
+  ];
+  rows.simulation={quinella:{'1-2':.12,'1-3':.10,'1-4':.07,'2-3':.09,'2-4':.065,'3-4':.04},wide:{'1-2':.40,'1-3':.30,'1-4':.22,'2-3':.31,'2-4':.23,'3-4':.18},trio:{}};
+  const actual={quinella:{'1-3':18,'1-4':26,'2-3':16,'2-4':24},wide:{'1-3':7,'1-4':9,'2-3':6,'2-4':8}};
+  const p=C.targetPlan122(rows,actual,{budget:1000,race:{},mode:'actual'});
+  if(p.targetRoi!==1.5)throw Error('v1.22 target EV '+p.targetRoi);
+  if(p.tickets.some(t=>t.oddsSource!=='実オッズ'||t.ev<1.5))throw Error('v1.22 actual gate '+JSON.stringify(p.tickets));
+  if(p.tickets.length>2)throw Error('v1.22 max tickets');
+  const f=C.targetPlan122(rows,{}, {budget:1000,race:{},mode:'forecast'});
+  if(f.tickets.length!==0||f.shadowTickets.length>2)throw Error('v1.22 forecast must be shadow only '+JSON.stringify(f));
+  const qp=C.axisHoleProfile122(rows,'馬複'),wp=C.axisHoleProfile122(rows,'ワイド');
+  if(!qp.anchor||!wp.anchor)throw Error('v1.22 type-specific anchors missing');
+  console.log('v1.22 EV150 / actual-only / type anchors: OK',p.stance,p.tickets.map(x=>[x.type,x.key,x.ev.toFixed(2)]));
+}
+{
+  const hist=[
+    {strategyVersion:C.STRATEGY_VERSION_122,stage122:{a:[{t:'馬複',k:'1-3',n:[1,3]}],b:[{t:'ワイド',k:'1-3',n:[1,3]}],bReady:true,actualAvailable:true},tickets:[{t:'馬複',k:'1-3',n:[1,3]}],result:{first:1,second:3,third:4},officialPayouts:{'馬複|1-3':1800,'ワイド|1-3':650}},
+    {strategyVersion:C.STRATEGY_VERSION_122,stage122:{a:[{t:'馬複',k:'2-4',n:[2,4]}],b:[],bReady:false,actualAvailable:false},tickets:[],result:{first:1,second:3,third:4},officialPayouts:{}}
+  ];
+  const z=C.stage122Stats(hist);
+  if(z.entries!==2||z.bReady!==1||z.cActual!==1)throw Error('v1.22 stage counts '+JSON.stringify(z));
+  if(Math.abs(z.a.roi-9)>1e-9||Math.abs(z.b.roi-6.5)>1e-9||Math.abs(z.c.roi-18)>1e-9)throw Error('v1.22 stage ROI '+JSON.stringify(z));
+  console.log('v1.22 stage A/B/C exact stats: OK',z.a.roi,z.b.roi,z.c.roi);
+}
