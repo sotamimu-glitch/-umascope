@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.20.1",
+  "name": "UmaScope Free AutoBet 1.21",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "実オッズ前は予想オッズで仮判定。実オッズ取得後は自動で実オッズを優先する、馬連・ワイドの軸→穴回収率戦略。"
+  "description": "公式結果ページから1〜3着と払戻を簡単取込。手入力時も的中したAI買い目の払戻だけを表示する省入力版。"
 }

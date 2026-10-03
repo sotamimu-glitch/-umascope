@@ -645,3 +645,46 @@ console.log('v1.9 tests: ALL OK');
   if(n&&n.forecastOdds!==12.4)throw Error('v1.20.1 compact forecast metadata');
   console.log('v1.20.1 storage metadata: OK');
 }
+
+
+// v1.21 official result parser regression
+{
+  const raw=JSON.stringify({
+    umascopeResult:1,
+    title:'2026年10月3日 東京 11R テストステークス',
+    url:'https://www.jra.go.jp/test',
+    text:'2026年10月3日 東京 11R\n払戻金',
+    tables:[
+      [['着順','枠','馬番','馬名'],['1','4','8','A'],['2','2','3','B'],['3','6','11','C']],
+      [['馬連','3-8','1,280円'],['ワイド','3-8','520円','8-11','760円','3-11','1,120円']]
+    ]
+  });
+  const r=C.parseOfficialResult(raw);
+  if(r.first!==8||r.second!==3||r.third!==11)throw Error('v1.21 finish parse '+JSON.stringify(r));
+  if(r.payouts[C.payoutKey('馬複',[3,8])]!==1280)throw Error('v1.21 quinella payout '+JSON.stringify(r.payouts));
+  if(r.payouts[C.payoutKey('ワイド',[3,8])]!==520)throw Error('v1.21 wide payout 3-8');
+  if(r.payouts[C.payoutKey('ワイド',[8,11])]!==760)throw Error('v1.21 wide payout 8-11');
+  console.log('v1.21 JRA-like result import: OK');
+}
+{
+  const raw=JSON.stringify({
+    umascopeResult:1,
+    title:'浦和 12R 結果',
+    text:'2026-10-03 浦和 12R',
+    tables:[
+      [['着順','馬番','馬名'],['1','1','ハクシン'],['2','5','マイアミ'],['3','6','トーセン']],
+      [['馬連複','1-5','2,340円'],['ワイド','1-5','720円'],['ワイド','1-6','1,010円'],['ワイド','5-6','880円']]
+    ]
+  });
+  const r=C.parseOfficialResult(raw);
+  if(r.first!==1||r.second!==5||r.third!==6)throw Error('v1.21 NAR finish '+JSON.stringify(r));
+  if(r.payouts[C.payoutKey('馬複',[1,5])]!==2340)throw Error('v1.21 NAR quinella');
+  console.log('v1.21 NAR-like result import: OK');
+}
+{
+  const raw='2026年10月3日 東京 11R\n1着 8番 A\n2着 3番 B\n3着 11番 C\n馬連 3-8 1,280円\nワイド 3-8 520円';
+  const r=C.parseOfficialResult(raw);
+  if(r.first!==8||r.second!==3||r.third!==11)throw Error('v1.21 text finish '+JSON.stringify(r));
+  if(r.payouts[C.payoutKey('馬複',[3,8])]!==1280)throw Error('v1.21 text payout');
+  console.log('v1.21 pasted text result import: OK');
+}

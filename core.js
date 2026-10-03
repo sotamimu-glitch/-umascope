@@ -2306,9 +2306,186 @@ function strategy120Stats(history){
     axisTop3Rate:settled?axisTop3/settled:null,holeTop3Rate:settled?holeTop3/settled:null
   }
 }
+
+// ============================================================
+// v1.21 — official result / payout quick import
+// ============================================================
+function resultPayload(raw){
+  const s=String(raw||'').trim();
+  if(!s)return {text:'',tables:[],title:'',url:''};
+  if(s.startsWith('{')){
+    try{
+      const j=JSON.parse(s);
+      if(j&&j.umascopeResult){
+        return {
+          text:String(j.text||''),
+          tables:Array.isArray(j.tables)?j.tables:[],
+          title:String(j.title||''),
+          url:String(j.url||'')
+        }
+      }
+    }catch{}
+  }
+  return {text:s,tables:[],title:'',url:''}
+}
+function cleanResultCell(v){return String(v??'').replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim()}
+function integerToken(v){
+  const m=fwDigits(cleanResultCell(v)).match(/^\D*(\d{1,2})\D*$/);
+  return m?Number(m[1]):null
+}
+function finishOrderFromTables(tables){
+  const found={};
+  for(const table of tables||[]){
+    if(!Array.isArray(table))continue;
+    let fi=-1,ni=-1,header=-1;
+    for(let r=0;r<Math.min(table.length,8);r++){
+      const cells=(table[r]||[]).map(cleanResultCell);
+      const f=cells.findIndex(x=>/^(?:着順|順位)$/.test(x)||/着順/.test(x));
+      const n=cells.findIndex(x=>/馬番/.test(x));
+      if(f>=0&&n>=0){fi=f;ni=n;header=r;break}
+    }
+    if(header>=0){
+      for(let r=header+1;r<table.length;r++){
+        const cells=(table[r]||[]).map(cleanResultCell),
+              pos=integerToken(cells[fi]),no=integerToken(cells[ni]);
+        if([1,2,3].includes(pos)&&Number.isFinite(no)&&no>=1&&no<=18&&!found[pos])found[pos]=no
+      }
+      if(found[1]&&found[2]&&found[3])return found
+    }
+  }
+  // Fallback for tables whose header text was stripped.
+  for(const table of tables||[])for(const row of table||[]){
+    const cells=(row||[]).map(cleanResultCell).filter(Boolean);
+    if(!cells.length)continue;
+    const pos=integerToken(cells[0]);
+    if(![1,2,3].includes(pos)||found[pos])continue;
+    const vals=cells.slice(1,5).map(integerToken).filter(x=>Number.isFinite(x)&&x>=1&&x<=18);
+    if(!vals.length)continue;
+    // Typical result rows are 着順 / 枠 / 馬番 / 馬名. Prefer 2nd numeric token
+    // when the first is a valid frame number and another horse-number-like token exists.
+    found[pos]=(vals.length>=2&&vals[0]<=8)?vals[1]:vals[0]
+  }
+  return found
+}
+function finishOrderFromText(text){
+  const found={},lines=String(text||'').split(/\n+/).map(cleanResultCell).filter(Boolean);
+  for(const line of lines){
+    let m=line.match(/^([123])着?\s+(\d{1,2})番(?:\s|$)/);
+    if(m){found[Number(m[1])]=Number(m[2]);continue}
+    m=line.match(/^([123])\s+(\d{1,2})\s+(\d{1,2})\s+/);
+    if(m){
+      const pos=Number(m[1]),a=Number(m[2]),b=Number(m[3]);
+      if(!found[pos])found[pos]=(a<=8&&b<=18)?b:a
+    }
+  }
+  return found
+}
+function payoutTypeFromCell(s){
+  const x=cleanResultCell(s);
+  if(/^(?:馬連複|馬連|馬複)$/.test(x))return '馬複';
+  if(/^ワイド$/.test(x))return 'ワイド';
+  if(/^単勝$/.test(x))return '単勝';
+  if(/^複勝$/.test(x))return '複勝';
+  if(/^三連複$/.test(x))return '三連複';
+  return null
+}
+function amountYen(v){
+  const s=fwDigits(cleanResultCell(v)).replace(/[，,]/g,'');
+  const m=s.match(/(\d{2,7})\s*円/);
+  return m?Number(m[1]):null
+}
+function pairToken(v){
+  const s=fwDigits(cleanResultCell(v));
+  const m=s.match(/(\d{1,2})\s*[-－−‐–—]\s*(\d{1,2})(?:\s*[-－−‐–—]\s*(\d{1,2}))?/);
+  return m?[Number(m[1]),Number(m[2]),m[3]?Number(m[3]):null].filter(Number.isFinite):null
+}
+function payoutFromTableRow(type,row,out){
+  const cells=(row||[]).map(cleanResultCell);
+  if(type==='馬複'||type==='ワイド'||type==='三連複'){
+    for(let i=0;i<cells.length;i++){
+      const nums=pairToken(cells[i]);if(!nums)continue;
+      if(type==='三連複'&&nums.length<3)continue;
+      if(type!=='三連複'&&nums.length<2)continue;
+      let amt=null;
+      for(let j=i+1;j<Math.min(cells.length,i+5);j++){amt=amountYen(cells[j]);if(amt!=null)break}
+      if(amt!=null)out[payoutKey(type,nums)]=amt
+    }
+  }else{
+    // Single/place rows can have horse numbers and amounts in adjacent cells or grouped text.
+    const nums=[],amts=[];
+    for(const c of cells){
+      if(amountYen(c)!=null)amts.push(amountYen(c));
+      else{
+        const s=fwDigits(c);
+        if(/^\d{1,2}$/.test(s)){const n=Number(s);if(n>=1&&n<=18)nums.push(n)}
+      }
+    }
+    for(let i=0;i<Math.min(nums.length,amts.length);i++)out[payoutKey(type,[nums[i]])]=amts[i]
+    // Fallback: "5 680円" in one cell.
+    for(const c of cells){
+      const s=fwDigits(c).replace(/[，,]/g,'');
+      const m=s.match(/(?:^|\s)(\d{1,2})\s+(\d{2,7})\s*円/);
+      if(m)out[payoutKey(type,[Number(m[1])])]=Number(m[2])
+    }
+  }
+}
+function payoutsFromTables(tables){
+  const out={};
+  for(const table of tables||[])for(const row of table||[]){
+    const cells=(row||[]).map(cleanResultCell);
+    const typeCell=cells.find(x=>payoutTypeFromCell(x));
+    const type=payoutTypeFromCell(typeCell);
+    if(type)payoutFromTableRow(type,cells,out)
+  }
+  return out
+}
+function payoutsFromText(text){
+  const out={};
+  for(const raw of String(text||'').split(/\n+/)){
+    const line=cleanResultCell(raw);if(!line)continue;
+    let typ=null;
+    if(/馬連複|馬連|馬複/.test(line))typ='馬複';
+    else if(/ワイド/.test(line))typ='ワイド';
+    else if(/三連複/.test(line))typ='三連複';
+    else if(/単勝/.test(line))typ='単勝';
+    else if(/複勝/.test(line))typ='複勝';
+    if(!typ)continue;
+    if(typ==='馬複'||typ==='ワイド'||typ==='三連複'){
+      const re=/(\d{1,2})\s*[-－−‐–—]\s*(\d{1,2})(?:\s*[-－−‐–—]\s*(\d{1,2}))?/g;
+      let m;
+      while((m=re.exec(fwDigits(line)))){
+        const nums=[Number(m[1]),Number(m[2]),m[3]?Number(m[3]):null].filter(Number.isFinite);
+        if(typ==='三連複'&&nums.length<3)continue;
+        const rest=fwDigits(line.slice(m.index+m[0].length)).replace(/[，,]/g,'');
+        const am=rest.match(/(\d{2,7})\s*円/);
+        if(am)out[payoutKey(typ,nums)]=Number(am[1])
+      }
+    }else{
+      const s=fwDigits(line).replace(/[，,]/g,'');
+      const re=/(\d{1,2})\D{0,8}(\d{2,7})\s*円/g;let m;
+      while((m=re.exec(s))){
+        const n=Number(m[1]);if(n>=1&&n<=18)out[payoutKey(typ,[n])]=Number(m[2])
+      }
+    }
+  }
+  return out
+}
+function parseOfficialResult(raw){
+  const p=resultPayload(raw),allText=[p.title,p.text].filter(Boolean).join('\n'),
+        ft=finishOrderFromTables(p.tables),fx=finishOrderFromText(p.text),
+        first=ft[1]||fx[1]||null,second=ft[2]||fx[2]||null,third=ft[3]||fx[3]||null,
+        payouts={...payoutsFromText(p.text),...payoutsFromTables(p.tables)},
+        refundKeys=parseRefundText(p.text),
+        dateM=fwDigits(allText).match(/(20\d{2})[年\/\-.](\d{1,2})[月\/\-.](\d{1,2})日?/),
+        raceM=fwDigits(allText).match(/(?:^|\s)(\d{1,2})\s*R(?:\s|$)/i),
+        date=dateM?`${dateM[1]}-${String(dateM[2]).padStart(2,'0')}-${String(dateM[3]).padStart(2,'0')}`:'',
+        raceNo=raceM?Number(raceM[1]):null,
+        confidence=(first&&second&&third?0.55:0)+(Object.keys(payouts).length?0.35:0)+(date||raceNo?0.10:0);
+  return {first,second,third,payouts,refundKeys,date,raceNo,title:p.title,url:p.url,text:p.text,confidence}
+}
 function parse(raw){
   const p=parsePayload(raw),r=parseNAR(p)||parseJRA(p);
   if(r)r.classLevel=classLevelFromText([r.name,p.title,p.text,p.jraText,p.narDetailText].filter(Boolean).join(' '),r.type);
   return r
 }
-const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,raceLevelOne,strengthAdjustedPerformance,raceLevelProfile,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationContext,calibrateContextOne,calibrationStatus,learnTicketThresholds,sameDayTrackBias,trackBiasAdjustment,biasStyleCode,rankingDiagnostics,effectGroupStats,v119EffectDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parsePlaceOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ACTIVE_TYPES_116,ACTIVE_TYPES_117,raceChaosFeatures,predictChaos,empiricalTicketGate,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,dailyExactStats,exactTicketRows,conditionRoiRanking,SHADOW_RULE_VERSION_1193,STRATEGY_VERSION_120,STRATEGY_VERSION_1201,marketHistorySignal1201,forecastMarketProbabilities1201,forecastPairOdds1201,ACTIVE_TYPES_120,PAIR_MIN_ODDS_120,PAIR_MIN_EV_120,axisScore120,darkHorseScore120,axisHoleProfile120,roiFirstPairScore120,strategy120Stats,buildStrongShadowTickets,shadowTickets,shadowExactStats,shadowStrongStats,modelVersionTuple,modelVersionAtLeast,roiOddsBand,roiProbBand,roiEvBand,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
+const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,raceLevelOne,strengthAdjustedPerformance,raceLevelProfile,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationContext,calibrateContextOne,calibrationStatus,learnTicketThresholds,sameDayTrackBias,trackBiasAdjustment,biasStyleCode,rankingDiagnostics,effectGroupStats,v119EffectDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parsePlaceOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ACTIVE_TYPES_116,ACTIVE_TYPES_117,raceChaosFeatures,predictChaos,empiricalTicketGate,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,resultPayload,finishOrderFromTables,finishOrderFromText,payoutsFromTables,payoutsFromText,parseOfficialResult,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,dailyExactStats,exactTicketRows,conditionRoiRanking,SHADOW_RULE_VERSION_1193,STRATEGY_VERSION_120,STRATEGY_VERSION_1201,marketHistorySignal1201,forecastMarketProbabilities1201,forecastPairOdds1201,ACTIVE_TYPES_120,PAIR_MIN_ODDS_120,PAIR_MIN_EV_120,axisScore120,darkHorseScore120,axisHoleProfile120,roiFirstPairScore120,strategy120Stats,buildStrongShadowTickets,shadowTickets,shadowExactStats,shadowStrongStats,modelVersionTuple,modelVersionAtLeast,roiOddsBand,roiProbBand,roiEvBand,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
