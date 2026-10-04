@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.22.4",
+  "name": "UmaScope Free AutoBet 1.22.5",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "C実オッズ再分析の反映不具合を修正。JRA馬連・ワイド実オッズ取込強化、手入力フォールバック、A/B/Cスナップショットを正しく保持。"
+  "description": "JRA馬連・ワイドの馬番順表をcaption/row構造から直接取り込む修正版。"
 }

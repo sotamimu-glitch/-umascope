@@ -739,3 +739,30 @@ console.log('v1.9 tests: ALL OK');
 }
 
 {const p=C.parseOddsPage1222(JSON.stringify({umascopeOdds:1,title:'2026年10月4日 東京 11R ワイド オッズ',url:'https://www.jra.go.jp/',tables:[[['3-8','5.8～6.2'],['3-11','8.1～9.0']]]}));if(p.kind!=='wide'||p.odds['3-8']!==5.8||p.odds['3-11']!==8.1||p.raceNo!==11)throw Error('odds page import '+JSON.stringify(p));console.log('v1.22.2 dedicated odds page: OK')}
+
+
+// v1.22.5 JRA caption-grid odds parser
+{
+  const q={umascopeOdds:2,title:'馬連オッズ（馬番順）',text:'2026年10月4日（日曜） 4回京都2日 2歳未勝利',
+    activeLabels:['馬連','2R'],
+    jraOddsBlocks:[
+      {kind:'quinella',caption:'1',rows:[['2','68.1'],['3','376.6'],['16','50.7']]},
+      {kind:'quinella',caption:'2',rows:[['3','88.9'],['16','145.5']]}
+    ]};
+  const z=C.parseOddsPage1222(JSON.stringify(q),null);
+  if(z.kind!=='quinella'||z.odds['1-2']!==68.1||z.odds['1-16']!==50.7||z.odds['2-16']!==145.5||z.raceNo!==2||z.date!=='2026-10-04')
+    throw Error('v1.22.5 JRA quinella '+JSON.stringify(z));
+  console.log('v1.22.5 JRA quinella caption-grid: OK');
+}
+{
+  const w={umascopeOdds:2,title:'ワイドオッズ（馬番順）',text:'2026年10月4日（日曜） 4回京都2日 2歳未勝利',
+    activeLabels:['ワイド','2R'],
+    jraOddsBlocks:[
+      {kind:'wide',caption:'1',rows:[['2','17.5','18.9'],['3','79.4','84.8'],['16','14.9','16.2']]},
+      {kind:'wide',caption:'2',rows:[['3','21.0 - 21.9'],['16','39.3','40.8']]}
+    ]};
+  const z=C.parseOddsPage1222(JSON.stringify(w),'quinella');
+  if(z.kind!=='wide'||z.odds['1-2']!==17.5||z.odds['1-16']!==14.9||z.odds['2-3']!==21.0||z.odds['2-16']!==39.3)
+    throw Error('v1.22.5 JRA wide '+JSON.stringify(z));
+  console.log('v1.22.5 JRA wide caption-grid/lower-bound: OK');
+}
