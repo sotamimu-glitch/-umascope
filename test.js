@@ -719,3 +719,21 @@ console.log('v1.9 tests: ALL OK');
   if(Math.abs(z.a.roi-9)>1e-9||Math.abs(z.b.roi-6.5)>1e-9||Math.abs(z.c.roi-18)>1e-9)throw Error('v1.22 stage ROI '+JSON.stringify(z));
   console.log('v1.22 stage A/B/C exact stats: OK',z.a.roi,z.b.roi,z.c.roi);
 }
+
+
+// v1.22.1 C-refresh regression
+{
+  const z=C.parseManualComboOdds1221('馬連 3-8=14.6\n馬連 3-11 22.4\nワイド 3-8=5.8\nワイド 3-11:8.1');
+  if(z.quinella['3-8']!==14.6||z.quinella['3-11']!==22.4)throw Error('v1.22.1 manual quinella '+JSON.stringify(z));
+  if(z.wide['3-8']!==5.8||z.wide['3-11']!==8.1)throw Error('v1.22.1 manual wide '+JSON.stringify(z));
+  const c=C.actualComboOddsCount1221(z);
+  if(c.quinella!==2||c.wide!==2)throw Error('v1.22.1 odds count '+JSON.stringify(c));
+  console.log('v1.22.1 manual C odds parser: OK');
+}
+{
+  const a={quinella:{'1-2':12},wide:{'1-2':5.2},trio:{}},
+        b={quinella:{'1-3':18},wide:{'1-3':7.1}};
+  const m=C.mergeActualComboOdds1221(a,b);
+  if(m.quinella['1-2']!==12||m.quinella['1-3']!==18||m.wide['1-3']!==7.1)throw Error('v1.22.1 merge odds');
+  console.log('v1.22.1 C odds merge: OK');
+}

@@ -1,9 +1,9 @@
 {
-  "name": "UmaScope Free AutoBet 1.22",
+  "name": "UmaScope Free AutoBet 1.22.1",
   "short_name": "UmaScope Auto",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#08110c",
   "theme_color": "#0b1711",
-  "description": "回収率優先の3段階分析。A事前、B同日3R後、C実オッズ最終判定。馬連10倍・ワイド5倍以上、最終EV150%以上を基本条件にする。"
+  "description": "C実オッズ再分析の反映不具合を修正。JRA馬連・ワイド実オッズ取込強化、手入力フォールバック、A/B/Cスナップショットを正しく保持。"
 }
