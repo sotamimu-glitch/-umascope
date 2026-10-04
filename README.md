@@ -1,9 +1,6 @@
-# UmaScope 1.22.3 — オッズ取込ブックマーク表示修正
-設定画面に「UmaScopeオッズ取込ブックマーク」を追加しました。
-トップ画面のコピーと設定画面のコピーは同じコードです。
-オッズ取込コードをアプリに内蔵したため、TXTの取得に失敗してもコピーできます。
-Service Workerのキャッシュにodds_bookmarklet.txtを追加しました。
-
-GitHubへindex.html、core.js、sw.js、manifest.webmanifestを上書き、
-odds_bookmarklet.txtを必ず追加してください。
-iPhoneで反映しない場合はSafariでGitHub PagesのURLを再読み込みしてください。
+# UmaScope 1.22.4
+- 仮候補＝黄、見送り＝赤、購入候補＝緑。
+- 馬連・ワイドのページをそれぞれ選択して別々に追加。先に入れた券種のオッズは保持。
+- 表形式と行分割形式の解析を拡張。
+- 実際のページ構造によっては未対応の可能性があります。取得0件ならページURLとスクリーンショットが必要です。
+GitHub: index.html, core.js, sw.js, manifest.webmanifest を上書き。odds_bookmarklet.txt は従来版を利用。

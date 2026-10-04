@@ -2521,33 +2521,47 @@ function actualComboOddsCount1221(comboOdds={}){
   return {quinella:valid(comboOdds.quinella),wide:valid(comboOdds.wide),trio:valid(comboOdds.trio)}
 }
 // Dedicated odds-page import. Never interpret an odds page as a race card.
-function parseOddsPage1222(raw){
+function parseOddsPage1222(raw,forcedKind=null){
  let p;try{p=typeof raw==='string'?JSON.parse(raw):raw}catch{return null}
  if(p?.umascopeOdds!==1)return null;
- const title=norm([p.title,p.pageHeading,p.text?.slice(0,500)].filter(Boolean).join(' '));
- const isWide=/ワイド|wide/i.test(title),isQuinella=/馬連|馬複|umalen|quinella/i.test(title);
- const kind=p.kind==='wide'?'wide':p.kind==='quinella'?'quinella':isWide?'wide':isQuinella?'quinella':null;
- if(!kind)return {error:'式別を判定できません。馬連またはワイドのオッズ画面で実行してください。'};
- const odds={};const put=(a,b,v)=>{a=Number(a);b=Number(b);v=Number(v);if(a>=1&&b>=1&&a<=20&&b<=20&&a!==b&&v>1&&v<=9999)odds[comboKey([a,b])]=v};
- // Structured table rows, including wide ranges (always choose lower bound).
- for(const table of p.tables||[])for(const row of table){const c=row.map(norm).map(x=>fwDigits(x).replace(/[－−–—]/g,'-'));
-  for(let i=0;i<c.length;i++){
-   let m=c[i].match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
-   if(m){for(let j=i+1;j<Math.min(c.length,i+4);j++){let v=c[j].match(/^(\d+(?:\.\d+)?)(?:\s*[-~～]\s*\d+(?:\.\d+)?)?(?:\s|$)/);if(v){put(m[1],m[2],v[1]);break}}}
-   // Some official tables split horse numbers across cells.
-   if(/^\d{1,2}$/.test(c[i])&&/^\d{1,2}$/.test(c[i+1]||'')){
-     let v=(c[i+2]||'').match(/^(\d+(?:\.\d+)?)(?:\s*[-~～]\s*\d+(?:\.\d+)?)?/);if(v)put(c[i],c[i+1],v[1]);
+ const title=norm([p.title,p.pageHeading].filter(Boolean).join(' '));
+ const isWide=/ワイド|wide/i.test(title),isQ=/馬連|馬複|umalen|quinella/i.test(title);
+ const kind=forcedKind==='wide'||forcedKind==='quinella'?forcedKind:p.kind==='wide'||p.kind==='quinella'?p.kind:isWide&&!isQ?'wide':isQ&&!isWide?'quinella':null;
+ if(!kind)return {error:'式別を選択してください（馬連／ワイド）。'};
+ const odds={};const put=(a,b,v)=>{
+  a=Number(a);b=Number(b);v=Number(String(v).replace(/,/g,''));
+  if(a>=1&&b>=1&&a<=20&&b<=20&&a!==b&&v>1&&v<=9999)odds[comboKey([a,b])]=v
+ };
+ const n=s=>fwDigits(norm(String(s||''))).replace(/[－−–—―]/g,'-').replace(/[～〜~]/g,'-').replace(/,/g,'');
+ const value=s=>{const m=n(s).match(/(\d+(?:\.\d+)?)(?:\s*[-]\s*\d+(?:\.\d+)?)?/);return m?Number(m[1]):null};
+ const pair=s=>{const m=n(s).match(/(?:^|[^\d])(\d{1,2})\s*[-－]\s*(\d{1,2})(?!\d)/);return m?[Number(m[1]),Number(m[2])]:null};
+ // Full visible rows and nested odds grids: read actual DOM cell text, not just document.body.innerText.
+ for(const table of p.tables||[])for(const row of table){
+  const cells=row.map(n);
+  for(let i=0;i<cells.length;i++){
+   const m=pair(cells[i]);
+   if(m){for(let j=i+1;j<Math.min(cells.length,i+4);j++){const v=value(cells[j]);if(v!=null){put(...m,v);break}}}
+   if(/^\d{1,2}$/.test(cells[i])&&/^\d{1,2}$/.test(cells[i+1]||'')){
+    const v=value(cells[i+2]);if(v!=null)put(cells[i],cells[i+1],v)
    }
   }
  }
- for(const line of String(p.text||'').split('\n')){
-  const z=fwDigits(norm(line)).replace(/[－−–—]/g,'-');
-  const m=z.match(/(?:^|\s)(\d{1,2})\s*-\s*(\d{1,2})\s+([0-9]+(?:\.[0-9]+)?)(?:\s*[-~～]\s*[0-9]+(?:\.[0-9]+)?)?/);
-  if(m)put(m[1],m[2],m[3]);
+ const lines=String(p.text||'').split(/\n/).map(n).filter(Boolean);
+ for(let i=0;i<lines.length;i++){
+  let line=lines[i];
+  // A single line may contain several pair/odds blocks.
+  const reg=/(\d{1,2})\s*-\s*(\d{1,2})\s+(\d+(?:\.\d+)?)(?:\s*-\s*\d+(?:\.\d+)?)?/g;
+  for(const m of line.matchAll(reg))put(m[1],m[2],m[3]);
+  const pr=pair(line);
+  if(pr&&!odds[comboKey(pr)]){
+   const tail=line.slice(line.search(/\d{1,2}\s*-\s*\d{1,2}/)).replace(/^\d{1,2}\s*-\s*\d{1,2}/,'');
+   const v=value(tail)||value(lines[i+1]);
+   if(v!=null)put(...pr,v)
+  }
  }
  const url=String(p.url||''),mNo=title.match(/(?:第\s*)?(\d{1,2})\s*(?:R|レース)/i)||url.match(/[?&](?:raceNo|raceNum|race_number)=(\d{1,2})/i);
  const date=title.match(/(20\d\d)[年\/-](\d{1,2})[月\/-](\d{1,2})/);
- return {kind,odds,title,url,raceNo:mNo?Number(mNo[1]):null,date:date?`${date[1]}-${date[2].padStart(2,'0')}-${date[3].padStart(2,'0')}`:null};
+ return {kind,odds,title,url,raceNo:mNo?Number(mNo[1]):null,date:date?`${date[1]}-${date[2].padStart(2,'0')}-${date[3].padStart(2,'0')}`:null,diagnostic:{tables:(p.tables||[]).length,lines:lines.length}};
 }
 function parse(raw){
   const p=parsePayload(raw),r=parseNAR(p)||parseJRA(p);
