@@ -737,3 +737,5 @@ console.log('v1.9 tests: ALL OK');
   if(m.quinella['1-2']!==12||m.quinella['1-3']!==18||m.wide['1-3']!==7.1)throw Error('v1.22.1 merge odds');
   console.log('v1.22.1 C odds merge: OK');
 }
+
+{const p=C.parseOddsPage1222(JSON.stringify({umascopeOdds:1,title:'2026年10月4日 東京 11R ワイド オッズ',url:'https://www.jra.go.jp/',tables:[[['3-8','5.8～6.2'],['3-11','8.1～9.0']]]}));if(p.kind!=='wide'||p.odds['3-8']!==5.8||p.odds['3-11']!==8.1||p.raceNo!==11)throw Error('odds page import '+JSON.stringify(p));console.log('v1.22.2 dedicated odds page: OK')}

@@ -2520,6 +2520,35 @@ function actualComboOddsCount1221(comboOdds={}){
   const valid=o=>Object.values(o||{}).filter(v=>Number.isFinite(Number(v))&&Number(v)>1).length;
   return {quinella:valid(comboOdds.quinella),wide:valid(comboOdds.wide),trio:valid(comboOdds.trio)}
 }
+// Dedicated odds-page import. Never interpret an odds page as a race card.
+function parseOddsPage1222(raw){
+ let p;try{p=typeof raw==='string'?JSON.parse(raw):raw}catch{return null}
+ if(p?.umascopeOdds!==1)return null;
+ const title=norm([p.title,p.pageHeading,p.text?.slice(0,500)].filter(Boolean).join(' '));
+ const isWide=/ワイド|wide/i.test(title),isQuinella=/馬連|馬複|umalen|quinella/i.test(title);
+ const kind=p.kind==='wide'?'wide':p.kind==='quinella'?'quinella':isWide?'wide':isQuinella?'quinella':null;
+ if(!kind)return {error:'式別を判定できません。馬連またはワイドのオッズ画面で実行してください。'};
+ const odds={};const put=(a,b,v)=>{a=Number(a);b=Number(b);v=Number(v);if(a>=1&&b>=1&&a<=20&&b<=20&&a!==b&&v>1&&v<=9999)odds[comboKey([a,b])]=v};
+ // Structured table rows, including wide ranges (always choose lower bound).
+ for(const table of p.tables||[])for(const row of table){const c=row.map(norm).map(x=>fwDigits(x).replace(/[－−–—]/g,'-'));
+  for(let i=0;i<c.length;i++){
+   let m=c[i].match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
+   if(m){for(let j=i+1;j<Math.min(c.length,i+4);j++){let v=c[j].match(/^(\d+(?:\.\d+)?)(?:\s*[-~～]\s*\d+(?:\.\d+)?)?(?:\s|$)/);if(v){put(m[1],m[2],v[1]);break}}}
+   // Some official tables split horse numbers across cells.
+   if(/^\d{1,2}$/.test(c[i])&&/^\d{1,2}$/.test(c[i+1]||'')){
+     let v=(c[i+2]||'').match(/^(\d+(?:\.\d+)?)(?:\s*[-~～]\s*\d+(?:\.\d+)?)?/);if(v)put(c[i],c[i+1],v[1]);
+   }
+  }
+ }
+ for(const line of String(p.text||'').split('\n')){
+  const z=fwDigits(norm(line)).replace(/[－−–—]/g,'-');
+  const m=z.match(/(?:^|\s)(\d{1,2})\s*-\s*(\d{1,2})\s+([0-9]+(?:\.[0-9]+)?)(?:\s*[-~～]\s*[0-9]+(?:\.[0-9]+)?)?/);
+  if(m)put(m[1],m[2],m[3]);
+ }
+ const url=String(p.url||''),mNo=title.match(/(?:第\s*)?(\d{1,2})\s*(?:R|レース)/i)||url.match(/[?&](?:raceNo|raceNum|race_number)=(\d{1,2})/i);
+ const date=title.match(/(20\d\d)[年\/-](\d{1,2})[月\/-](\d{1,2})/);
+ return {kind,odds,title,url,raceNo:mNo?Number(mNo[1]):null,date:date?`${date[1]}-${date[2].padStart(2,'0')}-${date[3].padStart(2,'0')}`:null};
+}
 function parse(raw){
   const p=parsePayload(raw),r=parseNAR(p)||parseJRA(p);
   if(r)r.classLevel=classLevelFromText([r.name,p.title,p.text,p.jraText,p.narDetailText].filter(Boolean).join(' '),r.type);
@@ -2653,4 +2682,4 @@ function stage122Stats(history){
   const entries=(history||[]).filter(x=>[STRATEGY_VERSION_122,STRATEGY_VERSION_1221].includes(x?.strategyVersion)),a=stageScopeExact122(entries,'a'),b=stageScopeExact122(entries,'b'),c=exactStats(entries,'purchase');
   return {entries:entries.length,a,b,c,bReady:entries.filter(x=>x?.stage122?.bReady).length,cActual:entries.filter(x=>x?.stage122?.actualAvailable).length}
 }
-const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,raceLevelOne,strengthAdjustedPerformance,raceLevelProfile,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationContext,calibrateContextOne,calibrationStatus,learnTicketThresholds,sameDayTrackBias,trackBiasAdjustment,biasStyleCode,rankingDiagnostics,effectGroupStats,v119EffectDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parsePlaceOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ACTIVE_TYPES_116,ACTIVE_TYPES_117,raceChaosFeatures,predictChaos,empiricalTicketGate,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,resultPayload,finishOrderFromTables,finishOrderFromText,payoutsFromTables,payoutsFromText,parseOfficialResult,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,dailyExactStats,exactTicketRows,conditionRoiRanking,SHADOW_RULE_VERSION_1193,STRATEGY_VERSION_120,STRATEGY_VERSION_1201,STRATEGY_VERSION_122,STRATEGY_VERSION_1221,parseManualComboOdds1221,mergeActualComboOdds1221,actualComboOddsCount1221,marketHistorySignal1201,forecastMarketProbabilities1201,forecastPairOdds1201,ticketRecommendations122,targetPlan122,stagedAnalysis122,stage122Stats,axisHoleProfile122,PAIR_MIN_EV_122,ACTIVE_TYPES_120,PAIR_MIN_ODDS_120,PAIR_MIN_EV_120,axisScore120,darkHorseScore120,axisHoleProfile120,roiFirstPairScore120,strategy120Stats,buildStrongShadowTickets,shadowTickets,shadowExactStats,shadowStrongStats,modelVersionTuple,modelVersionAtLeast,roiOddsBand,roiProbBand,roiEvBand,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
+const api={parsePayload,parse,parseJRA,parseNAR,parseJraPast,parseNarPasts,parseNarPastCell,classLevelFromText,rawFeatures,sixIndices,rank,INDEX_LABELS,MODEL_WEIGHTS,BASE_MODEL_WEIGHTS_112,modelScore,overallGrade,judgement,valueIndex,marginScoreOne,popularityScoreOne,raceLevelOne,strengthAdjustedPerformance,raceLevelProfile,racePerformance,trendScore,styleProfile,paceIndex,simulateRace,simulateRaceRole,forecastRows,weightWalkForward,roleWeightWalkForward,archiveConditionSignal,calibrationContext,calibrateContextOne,calibrationStatus,learnTicketThresholds,sameDayTrackBias,trackBiasAdjustment,biasStyleCode,rankingDiagnostics,effectGroupStats,v119EffectDiagnostics,roleRankingDiagnostics,ROLE_BASE_WEIGHTS_113,parseOddsText,parseOddsTables,parsePlaceOddsTables,parseComboOddsText,parseComboOddsTables,quinellaProb,wideProb,trioProb,combinationAdvice,ACTIVE_TYPES_116,ACTIVE_TYPES_117,raceChaosFeatures,predictChaos,empiricalTicketGate,ticketRecommendations,portfolioHitProbability,targetPlan,realisticBets,ticketNumbers,historyResult,historyTickets,ticketGrade,typeAccuracy,allTypeAccuracy,normalizeStoredTicket,backtestTickets,allSuggestedTickets,payoutKey,parseOfficialPayoutText,resultPayload,finishOrderFromTables,finishOrderFromText,payoutsFromTables,payoutsFromText,parseOfficialResult,parseRefundText,officialPayoutForTicket,exactRaceStats,exactStats,actualPurchaseStats,dailyExactStats,exactTicketRows,conditionRoiRanking,SHADOW_RULE_VERSION_1193,STRATEGY_VERSION_120,STRATEGY_VERSION_1201,STRATEGY_VERSION_122,STRATEGY_VERSION_1221,parseOddsPage1222,parseManualComboOdds1221,mergeActualComboOdds1221,actualComboOddsCount1221,marketHistorySignal1201,forecastMarketProbabilities1201,forecastPairOdds1201,ticketRecommendations122,targetPlan122,stagedAnalysis122,stage122Stats,axisHoleProfile122,PAIR_MIN_EV_122,ACTIVE_TYPES_120,PAIR_MIN_ODDS_120,PAIR_MIN_EV_120,axisScore120,darkHorseScore120,axisHoleProfile120,roiFirstPairScore120,strategy120Stats,buildStrongShadowTickets,shadowTickets,shadowExactStats,shadowStrongStats,modelVersionTuple,modelVersionAtLeast,roiOddsBand,roiProbBand,roiEvBand,suggestedRaceStats,suggestedStats,currentModelHistory,aiTop3,resultComparison,distanceBand,evBand,raceMeta,backtestRows,summarizeBacktest,groupBacktest,goalStats,walkForward};if(typeof module!=='undefined'&&module.exports)module.exports=api;g.UmaCore=api})(typeof globalThis!=='undefined'?globalThis:this);
